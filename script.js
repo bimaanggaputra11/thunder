@@ -1,6 +1,6 @@
 // Configuration
 const MINT_ADDRESS = "74x7Bu7JUAMGZ4G7v741pzSu7A7DvCxhnCeFoeyGpump";
-const SOLANA_RPC = "https://solana-api.projectserum.com";
+const SOLANA_RPC = "https://rpc.ankr.com/solana";
 const AUTO_SPIN_INTERVAL = 15 * 60 * 1000; // 15 minutes in milliseconds
 
 // Storage keys
