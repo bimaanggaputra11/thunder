@@ -15,10 +15,10 @@ const storage = {
     get: (key) => {
         try {
             const item = localStorage.getItem(key);
-            return item ? JSON.parse(item) : [];
+            return item ? JSON.parse(item) : null;
         } catch (e) {
             console.error('Error reading from localStorage:', e);
-            return [];
+            return null;
         }
     },
     set: (key, value) => {
@@ -29,6 +29,20 @@ const storage = {
         }
     }
 };
+
+// Simple Base58 validation for Solana address
+function isValidBase58(address) {
+    const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
+    return BASE58_REGEX.test(address);
+}
+
+function isValidSolanaAddress(address) {
+    // Solana address is base58 and length usually 32-44 characters
+    if (!address) return false;
+    if (address.length < 32 || address.length > 44) return false;
+    if (!isValidBase58(address)) return false;
+    return true;
+}
 
 // Solana token balance checker
 async function checkTokenBalance(walletAddress) {
@@ -55,6 +69,7 @@ async function checkTokenBalance(walletAddress) {
         });
 
         const data = await response.json();
+        console.log('RPC response:', data); // Debugging response
         
         if (data.error) {
             throw new Error(data.error.message);
@@ -91,8 +106,7 @@ if (document.getElementById('checkEligibility')) {
             return;
         }
 
-        // Basic Solana address validation (44 characters, base58)
-        if (address.length < 32 || address.length > 44) {
+        if (!isValidSolanaAddress(address)) {
             alert('Please enter a valid Solana wallet address');
             return;
         }
@@ -123,20 +137,36 @@ if (document.getElementById('checkEligibility')) {
         }
     });
 
-    submitButton.addEventListener('click', () => {
+    submitButton.addEventListener('click', async () => {
         const address = walletAddressInput.value.trim();
-        const holders = storage.get(STORAGE_KEYS.HOLDERS);
-        
-        // Check if address already exists
+
+        if (!address) {
+            alert('Please enter a wallet address');
+            return;
+        }
+
+        if (!isValidSolanaAddress(address)) {
+            alert('Please enter a valid Solana wallet address');
+            return;
+        }
+
+        // Double-check token holder status before submit
+        const isHolder = await checkTokenBalance(address);
+        if (!isHolder) {
+            alert('Address is not a token holder!');
+            return;
+        }
+
+        const holders = storage.get(STORAGE_KEYS.HOLDERS) || [];
+
         if (holders.includes(address)) {
             alert('This address is already registered!');
             return;
         }
 
-        // Add address to holders list
         holders.push(address);
         storage.set(STORAGE_KEYS.HOLDERS, holders);
-        
+
         alert('Address successfully registered! Redirecting to Lucky Wheel...');
         window.location.href = 'luckywheel.html';
     });
@@ -151,7 +181,6 @@ if (document.getElementById('wheelCanvas')) {
     
     let isSpinning = false;
     let currentRotation = 0;
-    let autoSpinTimer;
     let countdownTimer;
 
     // Wheel colors
@@ -167,7 +196,7 @@ if (document.getElementById('wheelCanvas')) {
         const centerY = canvas.height / 2;
         const radius = 180;
         
-        if (holders.length === 0) {
+        if (!holders || holders.length === 0) {
             // Draw empty wheel
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.beginPath();
@@ -229,7 +258,7 @@ if (document.getElementById('wheelCanvas')) {
     function spinWheel() {
         if (isSpinning) return;
         
-        const holders = storage.get(STORAGE_KEYS.HOLDERS);
+        const holders = storage.get(STORAGE_KEYS.HOLDERS) || [];
         if (holders.length === 0) {
             alert('No holders to spin!');
             return;
@@ -269,7 +298,7 @@ if (document.getElementById('wheelCanvas')) {
                 const winner = displayHolders[winnerIndex];
                 
                 // Move winners to history and remove from holders
-                const winners = storage.get(STORAGE_KEYS.WINNERS);
+                const winners = storage.get(STORAGE_KEYS.WINNERS) || [];
                 winners.push({
                     address: winner,
                     timestamp: new Date().toISOString(),
@@ -305,7 +334,7 @@ if (document.getElementById('wheelCanvas')) {
     }
 
     function updateHoldersList() {
-        const holders = storage.get(STORAGE_KEYS.HOLDERS);
+        const holders = storage.get(STORAGE_KEYS.HOLDERS) || [];
         const holdersListDiv = document.getElementById('holdersList');
         const holdersCountSpan = document.getElementById('holdersCount');
         
@@ -323,7 +352,7 @@ if (document.getElementById('wheelCanvas')) {
     }
 
     function updateWinnersList() {
-        const winners = storage.get(STORAGE_KEYS.WINNERS);
+        const winners = storage.get(STORAGE_KEYS.WINNERS) || [];
         const winnersListDiv = document.getElementById('winnersList');
         const winnersCountSpan = document.getElementById('winnersCount');
         
@@ -332,7 +361,7 @@ if (document.getElementById('wheelCanvas')) {
         if (winners.length === 0) {
             winnersListDiv.innerHTML = '<p class="empty-message">No winners yet.</p>';
         } else {
-            winnersListDiv.innerHTML = winners.reverse().map(winner => 
+            winnersListDiv.innerHTML = winners.slice().reverse().map(winner => 
                 `<div class="winner-item">
                     ${winner.address}
                     <span class="timestamp">${winner.spinTime}</span>
@@ -341,59 +370,43 @@ if (document.getElementById('wheelCanvas')) {
         }
     }
 
-    function updateCountdown() {
-        const lastSpin = storage.get(STORAGE_KEYS.LAST_SPIN)[0] || 0;
-        const now = Date.now();
-        const timeSinceLastSpin = now - lastSpin;
-        const timeUntilNextSpin = Math.max(0, AUTO_SPIN_INTERVAL - timeSinceLastSpin);
-        
-        if (timeUntilNextSpin === 0) {
-            spinWheel();
-            return;
-        }
-        
-        const minutes = Math.floor(timeUntilNextSpin / 60000);
-        const seconds = Math.floor((timeUntilNextSpin % 60000) / 1000);
-        countdownElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    }
-
+    // Countdown timer for next spin
     function startAutoSpinTimer() {
         clearInterval(countdownTimer);
-        countdownTimer = setInterval(updateCountdown, 1000);
-        updateCountdown();
+        
+        countdownTimer = setInterval(() => {
+            const lastSpin = storage.get(STORAGE_KEYS.LAST_SPIN) || 0;
+            const now = Date.now();
+            let diff = AUTO_SPIN_INTERVAL - (now - lastSpin);
+            
+            if (diff <= 0) {
+                spinWheel();
+                diff = AUTO_SPIN_INTERVAL;
+            }
+            
+            const minutes = Math.floor(diff / 60000);
+            const seconds = Math.floor((diff % 60000) / 1000);
+            countdownElement.textContent = `Next spin in: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
     }
 
-    // Initialize wheel page
     function initializeWheelPage() {
-        // Initialize storage if empty
-        if (storage.get(STORAGE_KEYS.CURRENT_WHEEL).length === 0) {
-            storage.set(STORAGE_KEYS.CURRENT_WHEEL, []);
+        if (!storage.get(STORAGE_KEYS.HOLDERS)) {
+            storage.set(STORAGE_KEYS.HOLDERS, []);
         }
-        if (storage.get(STORAGE_KEYS.QUEUE).length === 0) {
-            storage.set(STORAGE_KEYS.QUEUE, []);
+        if (!storage.get(STORAGE_KEYS.WINNERS)) {
+            storage.set(STORAGE_KEYS.WINNERS, []);
         }
-        if (storage.get(STORAGE_KEYS.SPIN_ROUND).length === 0) {
-            storage.set(STORAGE_KEYS.SPIN_ROUND, [1]);
+        if (!storage.get(STORAGE_KEYS.LAST_SPIN)) {
+            storage.set(STORAGE_KEYS.LAST_SPIN, 0);
         }
-        
-        updateParticipantsList();
+
+        updateHoldersList();
         updateWinnersList();
         startAutoSpinTimer();
-        
+
         spinButton.addEventListener('click', spinWheel);
     }
 
-    // Start the wheel page
     initializeWheelPage();
 }
-
-// Initialize countdown on page load if we're on the wheel page
-document.addEventListener('DOMContentLoaded', () => {
-    if (document.getElementById('countdown')) {
-        // Initialize last spin time if not set
-        const lastSpin = storage.get(STORAGE_KEYS.LAST_SPIN);
-        if (lastSpin.length === 0) {
-            storage.set(STORAGE_KEYS.LAST_SPIN, [Date.now()]);
-        }
-    }
-});
