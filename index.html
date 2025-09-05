@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lucky Wheel - Check Eligibility</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Lucky Wheel Token Holder</h1>
+        <div class="main-content">
+            <div class="form-container">
+                <h2>Check Your Eligibility</h2>
+                <p>Enter your Solana wallet address to check if you're eligible for the Lucky Wheel</p>
+                
+                <div class="input-group">
+                    <label for="walletAddress">Wallet Address:</label>
+                    <input type="text" id="walletAddress" placeholder="Enter your Solana wallet address" />
+                </div>
+                
+                <button id="checkEligibility" class="btn primary">Check Eligibility</button>
+                
+                <div id="result" class="result-container" style="display: none;">
+                    <div id="validHolder" class="success-message" style="display: none;">
+                        <p>✅ Congratulations! You are a valid token holder.</p>
+                        <button id="submitAddress" class="btn primary">Submit</button>
+                    </div>
+                    <div id="invalidHolder" class="error-message" style="display: none;">
+                        <p>❌ You are not a holder of the required token.</p>
+                    </div>
+                </div>
+                
+                <div id="loading" class="loading" style="display: none;">
+                    <p>Checking eligibility...</p>
+                </div>
+            </div>
+            
+            <div class="info-container">
+                <h3>Token Information</h3>
+                <p><strong>Required Token:</strong></p>
+                <p class="token-address">6Cxp4BTUPWjNEXnKgPS56BR7NP82CT87Das7XuV6pump</p>
+                <p><strong>Network:</strong> Solana Mainnet</p>
+            </div>
+        </div>
+        
+        <div class="navigation">
+            <a href="luckywheel.html" class="btn secondary">View Lucky Wheel</a>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.0/web3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
+    <script>
+        // Make Buffer available globally
+        window.Buffer = buffer.Buffer;
+    </script>
+    <script src="script.js"></script>
+</body>
+</html>
