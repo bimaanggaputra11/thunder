@@ -1,6 +1,6 @@
 // Configuration
 const MINT_ADDRESS = "74x7Bu7JUAMGZ4G7v741pzSu7A7DvCxhnCeFoeyGpump";
-const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
+const SOLANA_RPC = "https://solana-api.projectserum.com";
 const AUTO_SPIN_INTERVAL = 15 * 60 * 1000; // 15 minutes in milliseconds
 
 // Storage keys
@@ -46,6 +46,10 @@ function isValidSolanaAddress(address) {
 
 // Solana token balance checker
 async function checkTokenBalance(walletAddress) {
+    console.log("Checking balance for:", walletAddress);
+console.log("Using mint:", MINT_ADDRESS);
+console.log("Sending request to:", SOLANA_RPC);
+
     try {
         const response = await fetch(SOLANA_RPC, {
             method: 'POST',
@@ -86,6 +90,7 @@ async function checkTokenBalance(walletAddress) {
         console.error('Error checking token balance:', error);
         return false;
     }
+    
 }
 
 // Main page functionality
