@@ -1,5 +1,5 @@
 // Configuration
-const MINT_ADDRESS = "MASUKKAN_MINT_ADDRESS_SAYA_DI_SINI";
+const MINT_ADDRESS = "74x7Bu7JUAMGZ4G7v741pzSu7A7DvCxhnCeFoeyGpump";
 const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
 const AUTO_SPIN_INTERVAL = 15 * 60 * 1000; // 15 minutes in milliseconds
 
