@@ -19,6 +19,8 @@ let countdownTimer = SPIN_INTERVAL;
 let spinInterval = null;
 let wheelRotation = 0;
 let lastSpinTimestamp = null;
+let isSpinning = false; // PERBAIKAN: Tambahkan lock untuk mencegah spin bersamaan
+let realTimeSubscription = null; // PERBAIKAN: Untuk real-time updates
 
 // Cek apakah Supabase tersedia
 if (!supabase) {
@@ -108,6 +110,113 @@ function animateNumber(element, from, to) {
   }
   
   requestAnimationFrame(update);
+}
+
+// ==================== SPIN LOCK FUNCTIONS ====================
+// PERBAIKAN: Tambahkan fungsi untuk mencegah spin bersamaan
+async function initializeSpinLock() {
+  if (!supabase) {
+    console.warn('⚠️ Supabase tidak tersedia, menggunakan local spin lock');
+    return;
+  }
+
+  try {
+    // Initialize spin lock in database if not exists
+    const { data: existing } = await supabase
+      .from('settings')
+      .select('*')
+      .eq('key', 'spin_lock')
+      .maybeSingle();
+
+    if (!existing) {
+      await supabase.from('settings').insert({
+        key: 'spin_lock',
+        value: 'false'
+      });
+    }
+
+    console.log('✅ Spin lock initialized');
+  } catch (error) {
+    console.error('❌ Failed to initialize spin lock:', error);
+  }
+}
+
+async function acquireSpinLock() {
+  if (!supabase) return true; // Fallback ke local lock
+
+  try {
+    const { data, error } = await supabase
+      .from('settings')
+      .update({ value: 'true' })
+      .eq('key', 'spin_lock')
+      .eq('value', 'false') // Only update if currently false
+      .select();
+
+    return !error && data && data.length > 0;
+  } catch (error) {
+    console.error('❌ Failed to acquire spin lock:', error);
+    return false;
+  }
+}
+
+async function releaseSpinLock() {
+  if (!supabase) return;
+
+  try {
+    await supabase
+      .from('settings')
+      .update({ value: 'false' })
+      .eq('key', 'spin_lock');
+  } catch (error) {
+    console.error('❌ Failed to release spin lock:', error);
+  }
+}
+
+// ==================== REAL-TIME SYNC FUNCTIONS ====================
+// PERBAIKAN: Tambahkan real-time sync
+async function setupRealTimeSync() {
+  if (!supabase) {
+    console.warn('⚠️ Supabase tidak tersedia, real-time sync dinonaktifkan');
+    return;
+  }
+
+  try {
+    // Subscribe to changes in wheel_slots, queue_list, and winners_list
+    realTimeSubscription = supabase
+      .channel('game_updates')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'wheel_slots' },
+        handleRealTimeUpdate
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'queue_list' },
+        handleRealTimeUpdate
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'winners_list' },
+        handleRealTimeUpdate
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'settings' },
+        handleRealTimeUpdate
+      )
+      .subscribe();
+
+    console.log('✅ Real-time sync enabled');
+  } catch (error) {
+    console.error('❌ Failed to setup real-time sync:', error);
+  }
+}
+
+async function handleRealTimeUpdate(payload) {
+  console.log('📡 Real-time update received:', payload);
+  
+  // Debounce updates to prevent too frequent refreshes
+  clearTimeout(handleRealTimeUpdate.timeout);
+  handleRealTimeUpdate.timeout = setTimeout(async () => {
+    await loadGameState();
+    updateDisplay();
+  }, 1000);
 }
 
 // ==================== DATABASE FUNCTIONS ====================
@@ -498,57 +607,83 @@ function updateCountdownDisplay() {
 }
 
 async function performSpin() {
-  const filledSlots = wheelSlots.filter(Boolean);
-  if (filledSlots.length === 0) return;
-
-  // Update spin timestamp
-  await updateSpinTimestamp();
-
-  // Check if GSAP is available
-  if (typeof gsap === 'undefined') {
-    console.error('❌ GSAP library tidak tersedia');
-    // Fallback tanpa animasi
-    selectWinner();
+  // PERBAIKAN: Prevent multiple simultaneous spins
+  if (isSpinning) {
+    console.log('⚠️ Spin already in progress, skipping');
     return;
   }
 
-  // PERBAIKAN: Calculate final rotation to make spinning more natural
-  // Multiple full rotations + random final position
-  const minSpins = 4; // Minimum 4 full rotations
-  const maxSpins = 7; // Maximum 7 full rotations  
-  const spins = minSpins + Math.random() * (maxSpins - minSpins);
-  const randomFinalAngle = Math.random() * 2 * Math.PI;
-  
-  const totalRotation = spins * 2 * Math.PI + randomFinalAngle;
-  const duration = 3000 + Math.random() * 2000; // 3-5 seconds for more suspense
+  const filledSlots = wheelSlots.filter(Boolean);
+  if (filledSlots.length === 0) return;
 
-  console.log('🎪 Starting spin:', {
-    spins: spins.toFixed(1),
-    finalAngle: (randomFinalAngle * 180 / Math.PI).toFixed(1) + '°',
-    duration: (duration / 1000).toFixed(1) + 's'
-  });
+  // PERBAIKAN: Try to acquire spin lock
+  const lockAcquired = await acquireSpinLock();
+  if (!lockAcquired) {
+    console.log('⚠️ Could not acquire spin lock, another instance is spinning');
+    return;
+  }
 
-  // Show spinning message
-  showMessage('🎪 Wheel is spinning...', 'info');
+  isSpinning = true;
 
-  // Animate wheel spinning with more realistic easing
-  gsap.to({ rotation: wheelRotation }, {
-    rotation: wheelRotation + totalRotation,
-    duration: duration / 1000,
-    ease: "power3.out", // More natural deceleration
-    onUpdate: function() {
-      wheelRotation = this.targets()[0].rotation;
-      initializeWheel();
-    },
-    onComplete: function() {
-      // Clear spinning message
-      const msg = document.getElementById('message');
-      if (msg && msg.innerHTML.includes('spinning')) {
-        msg.innerHTML = '';
-      }
+  try {
+    // Update spin timestamp
+    await updateSpinTimestamp();
+
+    // Check if GSAP is available
+    if (typeof gsap === 'undefined') {
+      console.error('❌ GSAP library tidak tersedia');
+      // Fallback tanpa animasi
       selectWinner();
+      return;
     }
-  });
+
+    // PERBAIKAN: Calculate final rotation to make spinning more natural
+    // Multiple full rotations + random final position
+    const minSpins = 4; // Minimum 4 full rotations
+    const maxSpins = 7; // Maximum 7 full rotations  
+    const spins = minSpins + Math.random() * (maxSpins - minSpins);
+    const randomFinalAngle = Math.random() * 2 * Math.PI;
+    
+    const totalRotation = spins * 2 * Math.PI + randomFinalAngle;
+    const duration = 3000 + Math.random() * 2000; // 3-5 seconds for more suspense
+
+    console.log('🎪 Starting spin:', {
+      spins: spins.toFixed(1),
+      finalAngle: (randomFinalAngle * 180 / Math.PI).toFixed(1) + '°',
+      duration: (duration / 1000).toFixed(1) + 's'
+    });
+
+    // Show spinning message
+    showMessage('🎪 Wheel is spinning...', 'info');
+
+    // Animate wheel spinning with more realistic easing
+    gsap.to({ rotation: wheelRotation }, {
+      rotation: wheelRotation + totalRotation,
+      duration: duration / 1000,
+      ease: "power3.out", // More natural deceleration
+      onUpdate: function() {
+        wheelRotation = this.targets()[0].rotation;
+        initializeWheel();
+      },
+      onComplete: function() {
+        // Clear spinning message
+        const msg = document.getElementById('message');
+        if (msg && msg.innerHTML.includes('spinning')) {
+          msg.innerHTML = '';
+        }
+        selectWinner();
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error during spin:', error);
+    showMessage('Spin failed. Please try again.', 'error');
+  } finally {
+    // PERBAIKAN: Always release lock and reset spinning flag
+    setTimeout(async () => {
+      isSpinning = false;
+      await releaseSpinLock();
+    }, 1000);
+  }
 }
 
 // PERBAIKAN: Function untuk highlight winning slot
@@ -778,37 +913,83 @@ function openSocialMedia() {
   window.open('https://twitter.com/yourhandle', '_blank');
 }
 
+// ==================== CLEANUP FUNCTIONS ====================
+// PERBAIKAN: Tambahkan cleanup functions
+function cleanup() {
+  if (spinInterval) {
+    clearInterval(spinInterval);
+    spinInterval = null;
+  }
+  
+  if (realTimeSubscription) {
+    realTimeSubscription.unsubscribe();
+    realTimeSubscription = null;
+  }
+  
+  // Clear any pending timeouts
+  if (handleRealTimeUpdate.timeout) {
+    clearTimeout(handleRealTimeUpdate.timeout);
+  }
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', cleanup);
+window.addEventListener('unload', cleanup);
+
+// ==================== ERROR HANDLING ====================
+// PERBAIKAN: Global error handler
+window.addEventListener('error', function(event) {
+  console.error('❌ Global error:', event.error);
+  showMessage('An unexpected error occurred. Please refresh the page.', 'error');
+});
+
+window.addEventListener('unhandledrejection', function(event) {
+  console.error('❌ Unhandled promise rejection:', event.reason);
+  showMessage('A network error occurred. Please check your connection.', 'error');
+});
+
 // ==================== EVENT LISTENERS ====================
 document.addEventListener('DOMContentLoaded', async function() {
   console.log('🔄 Loading application...');
   
-  // PERBAIKAN: Definisikan utility functions secara lokal jika belum ada
-  const showLoadingLocal = (element) => {
-    if (element && element.classList) {
-      element.classList.add('loading');
-    }
-  };
-  
-  const hideLoadingLocal = (element) => {
-    if (element && element.classList) {
-      element.classList.remove('loading');
-    }
-  };
-  
   // PERBAIKAN: Show loading state during initialization
   const container = document.querySelector('.container');
-  showLoadingLocal(container);
+  showLoading(container);
   
   try {
     // Tunggu sedikit untuk memastikan semua library dimuat
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    // PERBAIKAN: Initialize spin lock dan real-time sync
-    await initializeSpinLock();
-    await setupRealTimeSync();
+    // PERBAIKAN: Initialize components step by step dengan error handling
+    try {
+      await initializeSpinLock();
+      console.log('✅ Spin lock initialized');
+    } catch (error) {
+      console.warn('⚠️ Failed to initialize spin lock:', error.message);
+    }
+    
+    try {
+      await setupRealTimeSync();
+      console.log('✅ Real-time sync initialized');
+    } catch (error) {
+      console.warn('⚠️ Failed to setup real-time sync:', error.message);
+    }
     
     // Load game state from database
-    await loadGameState();
+    try {
+      await loadGameState();
+      console.log('✅ Game state loaded');
+    } catch (error) {
+      console.error('❌ Failed to load game state:', error);
+      showMessage('Failed to load game data. Some features may not work properly.', 'error');
+      
+      // Initialize with defaults if loading fails
+      wheelSlots = Array(WHEEL_SLOTS).fill(null);
+      waitingQueue = [];
+      recentWinners = [];
+      countdownTimer = SPIN_INTERVAL;
+      lastSpinTimestamp = Date.now();
+    }
     
     // Initialize display
     initializeWheel();
@@ -822,6 +1003,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (walletInput) {
       walletInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
+          e.preventDefault();
           validateAddress();
         }
       });
@@ -847,21 +1029,56 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (fullAddress && navigator.clipboard) {
           navigator.clipboard.writeText(fullAddress).then(() => {
             showMessage('Address copied to clipboard! 📋', 'success');
+          }).catch(() => {
+            // Fallback for browsers without clipboard API
+            showMessage('Could not copy to clipboard. Please copy manually.', 'info');
           });
         }
       }
     });
 
+    // PERBAIKAN: Add manual spin button for testing (dapat dihapus di production)
+    const debugMode = window.location.hash.includes('debug');
+    if (debugMode) {
+      const debugPanel = document.createElement('div');
+      debugPanel.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px; z-index: 1000;';
+      debugPanel.innerHTML = `
+        <button onclick="performSpin()" style="margin: 5px; padding: 5px 10px;">Force Spin</button>
+        <button onclick="console.log({wheelSlots, waitingQueue, recentWinners})" style="margin: 5px; padding: 5px 10px;">Log State</button>
+      `;
+      document.body.appendChild(debugPanel);
+      console.log('🔧 Debug mode enabled');
+    }
+
     console.log('✅ Application loaded successfully');
+    showMessage('Application loaded successfully! 🎉', 'success');
   } catch (error) {
     console.error('❌ Failed to load application:', error);
     showMessage('Failed to load application. Please refresh the page.', 'error');
   } finally {
     // PERBAIKAN: Hide loading state
-    hideLoadingLocal(container);
+    hideLoading(container);
   }
 });
 
 // ==================== EXPOSE FUNCTIONS TO GLOBAL SCOPE ====================
 window.validateAddress = validateAddress;
 window.openSocialMedia = openSocialMedia;
+
+// PERBAIKAN: Expose debug functions if needed
+if (window.location.hash.includes('debug')) {
+  window.performSpin = performSpin;
+  window.gameState = () => ({ wheelSlots, waitingQueue, recentWinners, countdownTimer });
+  window.resetGame = async () => {
+    if (confirm('Are you sure you want to reset the entire game? This will clear all data.')) {
+      wheelSlots = Array(WHEEL_SLOTS).fill(null);
+      waitingQueue = [];
+      recentWinners = [];
+      countdownTimer = SPIN_INTERVAL;
+      lastSpinTimestamp = Date.now();
+      await saveGameState();
+      updateDisplay();
+      console.log('🔄 Game reset completed');
+    }
+  };
+}
