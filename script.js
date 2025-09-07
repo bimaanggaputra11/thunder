@@ -531,30 +531,67 @@ function openSocialMedia() {
 document.addEventListener('DOMContentLoaded', async function() {
   console.log('🔄 Loading application...');
   
-  // Tunggu sedikit untuk memastikan semua library dimuat
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // PERBAIKAN: Show loading state during initialization
+  const container = document.querySelector('.container');
+  showLoading(container);
   
-  // Load game state from database
-  await loadGameState();
-  
-  // Initialize display
-  initializeWheel();
-  updateDisplay();
-  
-  // Start countdown with loaded time
-  startCountdown();
+  try {
+    // Tunggu sedikit untuk memastikan semua library dimuat
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Load game state from database
+    await loadGameState();
+    
+    // Initialize display
+    initializeWheel();
+    updateDisplay();
+    
+    // Start countdown with loaded time
+    startCountdown();
 
-  // Add event listeners
-  const walletInput = document.getElementById('walletAddress');
-  if (walletInput) {
-    walletInput.addEventListener('keypress', function(e) {
-      if (e.key === 'Enter') {
-        validateAddress();
+    // Add event listeners
+    const walletInput = document.getElementById('walletAddress');
+    if (walletInput) {
+      walletInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          validateAddress();
+        }
+      });
+      
+      // PERBAIKAN: Auto-clear error messages when user starts typing
+      walletInput.addEventListener('input', function() {
+        const msg = document.getElementById('message');
+        const currentMessage = msg?.querySelector('.error-message');
+        if (currentMessage) {
+          msg.innerHTML = '';
+        }
+      });
+    }
+
+    // PERBAIKAN: Add click-to-copy functionality for addresses in lists
+    document.addEventListener('click', function(e) {
+      if (e.target.classList.contains('list-address') && e.target.textContent !== '-') {
+        const address = e.target.textContent;
+        // Find full address from our arrays
+        const fullAddress = [...wheelSlots.filter(Boolean), ...waitingQueue, ...recentWinners]
+          .find(addr => formatAddress(addr) === address);
+        
+        if (fullAddress && navigator.clipboard) {
+          navigator.clipboard.writeText(fullAddress).then(() => {
+            showMessage('Address copied to clipboard! 📋', 'success');
+          });
+        }
       }
     });
-  }
 
-  console.log('✅ Application loaded successfully');
+    console.log('✅ Application loaded successfully');
+  } catch (error) {
+    console.error('❌ Failed to load application:', error);
+    showMessage('Failed to load application. Please refresh the page.', 'error');
+  } finally {
+    // PERBAIKAN: Hide loading state
+    hideLoading(container);
+  }
 });
 
 // Expose functions to global scope
