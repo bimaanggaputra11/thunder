@@ -90,11 +90,11 @@ body {
 
 /* Validation Section */
 .validation-card {
-  background: rgb(255, 255, 255);
+  background: rgb(192, 174, 174);
   border-radius: 20px;
   padding: 30px;
   text-align: center;
-  box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+  box-shadow: 0 5px 20px rgba(212, 206, 206, 0.1);
 }
 
 .validation-card h2 {
