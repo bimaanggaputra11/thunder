@@ -2,25 +2,36 @@
 const SUPABASE_URL = 'https://bewuevhfiehsjofvwpbi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJld3VldmhmaWVoc2pvZnZ3cGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxNjA1MDEsImV4cCI6MjA3MjczNjUwMX0.o7KJ4gkbfZKYy3lvuV63yGM5XCnk5xk4vCLv46hNAII';
 
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// PERBAIKAN: Gunakan window.supabase atau pastikan library dimuat
+const supabase = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Configuration
 const TOKEN_MINT = "ACbRrERR5GJnADhLhhanxrDCXJzGhyF64SKihbzBpump";
 const WHEEL_SLOTS = 8; // Number of slots in the wheel
 const SPIN_INTERVAL = 5 * 60; // 5 minutes in seconds
 
-// Game state
+// PERBAIKAN: Inisialisasi variabel game state dengan nilai default
 let wheelSlots = Array(WHEEL_SLOTS).fill(null);
 let waitingQueue = [];
-let recentWinners = [];
+let recentWinners = []; // Inisialisasi dengan array kosong
 let currentUser = null;
 let countdownTimer = SPIN_INTERVAL;
 let spinInterval = null;
 let wheelRotation = 0;
 let lastSpinTimestamp = null;
 
+// Cek apakah Supabase tersedia
+if (!supabase) {
+  console.error('❌ Supabase client tidak dapat diinisialisasi. Pastikan library Supabase sudah dimuat.');
+}
+
 // Database functions
 async function saveGameState() {
+  if (!supabase) {
+    console.error('❌ Supabase client tidak tersedia');
+    return;
+  }
+
   try {
     // Save wheel slots
     for (let i = 0; i < wheelSlots.length; i++) {
@@ -68,6 +79,11 @@ async function saveGameState() {
 }
 
 async function loadGameState() {
+  if (!supabase) {
+    console.error('❌ Supabase client tidak tersedia');
+    return;
+  }
+
   try {
     // Load winners first (to exclude them from wheel and queue)
     const { data: winnersData } = await supabase
@@ -142,6 +158,11 @@ function calculateRemainingTime() {
 }
 
 async function updateSpinTimestamp() {
+  if (!supabase) {
+    console.error('❌ Supabase client tidak tersedia');
+    return;
+  }
+
   lastSpinTimestamp = Date.now();
   await supabase.from('settings').upsert([{ 
     key: 'last_spin_timestamp', 
@@ -152,6 +173,11 @@ async function updateSpinTimestamp() {
 // Initialize wheel canvas
 function initializeWheel() {
   const canvas = document.getElementById('wheelCanvas');
+  if (!canvas) {
+    console.error('❌ Canvas element tidak ditemukan');
+    return;
+  }
+
   const ctx = canvas.getContext('2d');
   const centerX = canvas.width / 2;
   const centerY = canvas.height / 2;
@@ -250,10 +276,16 @@ async function validateHolder(address) {
   }
 }
 
-// Validate wallet address
+// PERBAIKAN: Validate wallet address dengan pengecekan yang lebih aman
 async function validateAddress() {
   const input = document.getElementById('walletAddress');
   const msg = document.getElementById('message');
+  
+  if (!input || !msg) {
+    console.error('❌ Element tidak ditemukan');
+    return;
+  }
+
   const address = input.value.trim();
 
   msg.innerHTML = '';
@@ -266,6 +298,12 @@ async function validateAddress() {
   if (address.length < 32 || address.length > 44) {
     showMessage('Invalid wallet address format', 'error');
     return;
+  }
+
+  // PERBAIKAN: Pastikan recentWinners sudah diinisialisasi
+  if (!Array.isArray(recentWinners)) {
+    console.warn('⚠️ recentWinners belum diinisialisasi, menggunakan array kosong');
+    recentWinners = [];
   }
 
   // Check if address is already a winner
@@ -289,10 +327,17 @@ async function validateAddress() {
 
 function showMessage(text, type) {
   const msg = document.getElementById('message');
-  msg.innerHTML = `<div class="message ${type}-message">${text}</div>`;
+  if (msg) {
+    msg.innerHTML = `<div class="message ${type}-message">${text}</div>`;
+  }
 }
 
 async function addUserToSystem(address) {
+  // Pastikan arrays sudah diinisialisasi
+  if (!Array.isArray(recentWinners)) recentWinners = [];
+  if (!Array.isArray(wheelSlots)) wheelSlots = Array(WHEEL_SLOTS).fill(null);
+  if (!Array.isArray(waitingQueue)) waitingQueue = [];
+
   // Check if address is already in the system or is a winner
   if (recentWinners.includes(address) || 
       wheelSlots.includes(address) || 
@@ -325,9 +370,12 @@ function startCountdown() {
 }
 
 function updateCountdownDisplay() {
-  const minutes = Math.floor(countdownTimer / 60).toString().padStart(2, '0');
-  const seconds = (countdownTimer % 60).toString().padStart(2, '0');
-  document.getElementById('countdownTimer').textContent = `${minutes}:${seconds}`;
+  const timerElement = document.getElementById('countdownTimer');
+  if (timerElement) {
+    const minutes = Math.floor(countdownTimer / 60).toString().padStart(2, '0');
+    const seconds = (countdownTimer % 60).toString().padStart(2, '0');
+    timerElement.textContent = `${minutes}:${seconds}`;
+  }
 }
 
 async function performSpin() {
@@ -336,6 +384,14 @@ async function performSpin() {
 
   // Update spin timestamp
   await updateSpinTimestamp();
+
+  // Check if GSAP is available
+  if (typeof gsap === 'undefined') {
+    console.error('❌ GSAP library tidak tersedia');
+    // Fallback tanpa animasi
+    selectWinner();
+    return;
+  }
 
   // Animate wheel spinning
   const totalRotation = Math.PI * 8 + Math.random() * Math.PI * 2; // 4 full rotations plus random
@@ -396,58 +452,74 @@ function updateDisplay() {
 }
 
 function updateStats() {
-  const participants = wheelSlots.filter(Boolean).length + waitingQueue.length;
-  document.getElementById('participantCount').textContent = participants;
-  document.getElementById('queueCount').textContent = waitingQueue.length;
-  document.getElementById('totalWinnerCount').textContent = recentWinners.length;
+  const participantCountEl = document.getElementById('participantCount');
+  const queueCountEl = document.getElementById('queueCount');
+  const totalWinnerCountEl = document.getElementById('totalWinnerCount');
+
+  if (participantCountEl) {
+    const participants = wheelSlots.filter(Boolean).length + waitingQueue.length;
+    participantCountEl.textContent = participants;
+  }
+
+  if (queueCountEl) {
+    queueCountEl.textContent = waitingQueue.length;
+  }
+
+  if (totalWinnerCountEl) {
+    totalWinnerCountEl.textContent = recentWinners.length;
+  }
 }
 
 function updateLists() {
   // Update waiting queue list
   const queueContainer = document.getElementById('waitingQueueList');
-  const queueHTML = [];
-  
-  // Show actual queue first (excluding winners)
-  const displayQueue = waitingQueue.filter(addr => !recentWinners.includes(addr));
-  displayQueue.forEach((address, index) => {
-    queueHTML.push(`<div class="list-item">
-      <span class="list-number">${index + 1}.</span>
-      <span class="list-address">${formatAddress(address)}</span>
-    </div>`);
-  });
-  
-  // Fill remaining slots with placeholders
-  for (let i = displayQueue.length; i < 11; i++) {
-    queueHTML.push(`<div class="list-item">
-      <span class="list-number">${i + 1}.</span>
-      <span class="list-address">-</span>
-    </div>`);
+  if (queueContainer) {
+    const queueHTML = [];
+    
+    // Show actual queue first (excluding winners)
+    const displayQueue = waitingQueue.filter(addr => !recentWinners.includes(addr));
+    displayQueue.forEach((address, index) => {
+      queueHTML.push(`<div class="list-item">
+        <span class="list-number">${index + 1}.</span>
+        <span class="list-address">${formatAddress(address)}</span>
+      </div>`);
+    });
+    
+    // Fill remaining slots with placeholders
+    for (let i = displayQueue.length; i < 11; i++) {
+      queueHTML.push(`<div class="list-item">
+        <span class="list-number">${i + 1}.</span>
+        <span class="list-address">-</span>
+      </div>`);
+    }
+    
+    queueContainer.innerHTML = queueHTML.join('');
   }
-  
-  queueContainer.innerHTML = queueHTML.join('');
 
   // Update recent winners list
   const winnersContainer = document.getElementById('recentWinnersList');
-  const winnersHTML = [];
-  
-  // Show recent winners (latest first)
-  const displayWinners = recentWinners.slice(-11).reverse();
-  displayWinners.forEach((address, index) => {
-    winnersHTML.push(`<div class="list-item">
-      <span class="list-number">${index + 1}.</span>
-      <span class="list-address">${formatAddress(address)}</span>
-    </div>`);
-  });
-  
-  // Fill remaining slots with placeholders
-  for (let i = displayWinners.length; i < 11; i++) {
-    winnersHTML.push(`<div class="list-item">
-      <span class="list-number">${i + 1}.</span>
-      <span class="list-address">-</span>
-    </div>`);
+  if (winnersContainer) {
+    const winnersHTML = [];
+    
+    // Show recent winners (latest first)
+    const displayWinners = recentWinners.slice(-11).reverse();
+    displayWinners.forEach((address, index) => {
+      winnersHTML.push(`<div class="list-item">
+        <span class="list-number">${index + 1}.</span>
+        <span class="list-address">${formatAddress(address)}</span>
+      </div>`);
+    });
+    
+    // Fill remaining slots with placeholders
+    for (let i = displayWinners.length; i < 11; i++) {
+      winnersHTML.push(`<div class="list-item">
+        <span class="list-number">${i + 1}.</span>
+        <span class="list-address">-</span>
+      </div>`);
+    }
+    
+    winnersContainer.innerHTML = winnersHTML.join('');
   }
-  
-  winnersContainer.innerHTML = winnersHTML.join('');
 }
 
 function openSocialMedia() {
@@ -458,6 +530,9 @@ function openSocialMedia() {
 // Event listeners
 document.addEventListener('DOMContentLoaded', async function() {
   console.log('🔄 Loading application...');
+  
+  // Tunggu sedikit untuk memastikan semua library dimuat
+  await new Promise(resolve => setTimeout(resolve, 100));
   
   // Load game state from database
   await loadGameState();
@@ -470,11 +545,14 @@ document.addEventListener('DOMContentLoaded', async function() {
   startCountdown();
 
   // Add event listeners
-  document.getElementById('walletAddress').addEventListener('keypress', function(e) {
-    if (e.key === 'Enter') {
-      validateAddress();
-    }
-  });
+  const walletInput = document.getElementById('walletAddress');
+  if (walletInput) {
+    walletInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        validateAddress();
+      }
+    });
+  }
 
   console.log('✅ Application loaded successfully');
 });
