@@ -1,417 +1,484 @@
+// Supabase Configuration
+const SUPABASE_URL = 'https://bewuevhfiehsjofvwpbi.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJld3VldmhmaWVoc2pvZnZ3cGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxNjA1MDEsImV4cCI6MjA3MjczNjUwMX0.o7KJ4gkbfZKYy3lvuV63yGM5XCnk5xk4vCLv46hNAII';
+
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 // Configuration
-const MINT_ADDRESS = "74x7Bu7JUAMGZ4G7v741pzSu7A7DvCxhnCeFoeyGpump";
-const SOLANA_RPC = "https://rpc.ankr.com/solana";
-const AUTO_SPIN_INTERVAL = 15 * 60 * 1000; // 15 minutes in milliseconds
+const TOKEN_MINT = "ACbRrERR5GJnADhLhhanxrDCXJzGhyF64SKihbzBpump";
+const WHEEL_SLOTS = 8; // Number of slots in the wheel
+const SPIN_INTERVAL = 5 * 60; // 5 minutes in seconds
 
-// Storage keys
-const STORAGE_KEYS = {
-    HOLDERS: 'luckywheel_holders',
-    WINNERS: 'luckywheel_winners',
-    LAST_SPIN: 'luckywheel_last_spin'
-};
+// Game state
+let wheelSlots = Array(WHEEL_SLOTS).fill(null);
+let waitingQueue = [];
+let recentWinners = [];
+let currentUser = null;
+let countdownTimer = SPIN_INTERVAL;
+let spinInterval = null;
+let wheelRotation = 0;
+let lastSpinTimestamp = null;
 
-// Utility functions for localStorage
-const storage = {
-    get: (key) => {
-        try {
-            const item = localStorage.getItem(key);
-            return item ? JSON.parse(item) : null;
-        } catch (e) {
-            console.error('Error reading from localStorage:', e);
-            return null;
+// Database functions
+async function saveGameState() {
+  try {
+    // Save wheel slots
+    for (let i = 0; i < wheelSlots.length; i++) {
+      await supabase.from('wheel_slots').upsert({ 
+        slot_index: i, 
+        address: wheelSlots[i] 
+      }, { onConflict: 'slot_index' });
+    }
+
+    // Save waiting queue
+    await supabase.from('queue_list').delete().neq('address', '');
+    const uniqueQueue = [...new Set(waitingQueue)];
+    for (const addr of uniqueQueue) {
+      await supabase.from('queue_list').insert({ address: addr });
+    }
+
+    // Save winners
+    for (const winner of recentWinners) {
+      const { data: existing } = await supabase
+        .from('winners_list')
+        .select('address')
+        .eq('address', winner)
+        .maybeSingle();
+
+      if (!existing) {
+        await supabase.from('winners_list').insert({
+          address: winner,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Save last spin timestamp
+    if (lastSpinTimestamp) {
+      await supabase.from('settings').upsert([{ 
+        key: 'last_spin_timestamp', 
+        value: String(lastSpinTimestamp) 
+      }], { onConflict: 'key' });
+    }
+
+    console.log('✅ Game state saved to database');
+  } catch (error) {
+    console.error('❌ Failed to save game state:', error);
+  }
+}
+
+async function loadGameState() {
+  try {
+    // Load winners first (to exclude them from wheel and queue)
+    const { data: winnersData } = await supabase
+      .from('winners_list')
+      .select('*')
+      .order('timestamp', { ascending: true });
+
+    const allWinners = winnersData ? winnersData.map(w => w.address) : [];
+    recentWinners = [...new Set(allWinners)]; // Remove duplicates
+
+    // Load wheel slots (exclude winners)
+    const { data: slotsData } = await supabase
+      .from('wheel_slots')
+      .select('*')
+      .order('slot_index', { ascending: true });
+
+    wheelSlots = Array(WHEEL_SLOTS).fill(null);
+    if (slotsData) {
+      for (const slot of slotsData) {
+        if (slot.address && !recentWinners.includes(slot.address)) {
+          wheelSlots[slot.slot_index] = slot.address;
         }
+      }
+    }
+
+    // Load waiting queue (exclude winners)
+    const { data: queueData } = await supabase
+      .from('queue_list')
+      .select('*')
+      .order('id', { ascending: true });
+
+    const allQueue = queueData ? queueData.map(q => q.address) : [];
+    waitingQueue = [...new Set(allQueue.filter(addr => !recentWinners.includes(addr)))];
+
+    // Load last spin timestamp
+    const { data: timestampData } = await supabase
+      .from('settings')
+      .select('*')
+      .eq('key', 'last_spin_timestamp')
+      .maybeSingle();
+
+    if (timestampData?.value) {
+      lastSpinTimestamp = parseInt(timestampData.value);
+      calculateRemainingTime();
+    } else {
+      // If no timestamp exists, set current time as last spin
+      lastSpinTimestamp = Date.now();
+      countdownTimer = SPIN_INTERVAL;
+      await saveGameState();
+    }
+
+    console.log('✅ Game state loaded from database');
+  } catch (error) {
+    console.error('❌ Failed to load game state:', error);
+  }
+}
+
+function calculateRemainingTime() {
+  if (!lastSpinTimestamp) {
+    countdownTimer = SPIN_INTERVAL;
+    return;
+  }
+
+  const elapsed = Math.floor((Date.now() - lastSpinTimestamp) / 1000);
+  countdownTimer = Math.max(0, SPIN_INTERVAL - elapsed);
+  
+  if (countdownTimer === 0) {
+    // If time has passed, perform spin immediately
+    setTimeout(performSpin, 1000);
+    countdownTimer = SPIN_INTERVAL;
+  }
+}
+
+async function updateSpinTimestamp() {
+  lastSpinTimestamp = Date.now();
+  await supabase.from('settings').upsert([{ 
+    key: 'last_spin_timestamp', 
+    value: String(lastSpinTimestamp) 
+  }], { onConflict: 'key' });
+}
+
+// Initialize wheel canvas
+function initializeWheel() {
+  const canvas = document.getElementById('wheelCanvas');
+  const ctx = canvas.getContext('2d');
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  const radius = 140;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw wheel segments
+  const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
+  
+  for (let i = 0; i < WHEEL_SLOTS; i++) {
+    const startAngle = i * anglePerSlot + wheelRotation;
+    const endAngle = (i + 1) * anglePerSlot + wheelRotation;
+    
+    // Segment background
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+    ctx.lineTo(centerX, centerY);
+    ctx.fillStyle = wheelSlots[i] ? '#f0f0f0' : '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw text
+    if (wheelSlots[i]) {
+      const textAngle = startAngle + anglePerSlot / 2;
+      const textX = centerX + Math.cos(textAngle) * (radius * 0.7);
+      const textY = centerY + Math.sin(textAngle) * (radius * 0.7);
+      
+      ctx.save();
+      ctx.translate(textX, textY);
+      ctx.rotate(textAngle + Math.PI / 2);
+      ctx.fillStyle = '#333';
+      ctx.font = '10px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(formatAddress(wheelSlots[i]), 0, 0);
+      ctx.restore();
+    } else {
+      // Draw "Address holder" text for empty slots
+      const textAngle = startAngle + anglePerSlot / 2;
+      const textX = centerX + Math.cos(textAngle) * (radius * 0.7);
+      const textY = centerY + Math.sin(textAngle) * (radius * 0.7);
+      
+      ctx.save();
+      ctx.translate(textX, textY);
+      ctx.rotate(textAngle + Math.PI / 2);
+      ctx.fillStyle = '#999';
+      ctx.font = '8px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Address holder', 0, 0);
+      ctx.restore();
+    }
+  }
+
+  // Draw center circle
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 20, 0, 2 * Math.PI);
+  ctx.fillStyle = '#333';
+  ctx.fill();
+
+  // Draw pointer (triangle pointing to the wheel)
+  ctx.beginPath();
+  ctx.moveTo(centerX + radius + 10, centerY);
+  ctx.lineTo(centerX + radius - 10, centerY - 15);
+  ctx.lineTo(centerX + radius - 10, centerY + 15);
+  ctx.closePath();
+  ctx.fillStyle = '#333';
+  ctx.fill();
+}
+
+function formatAddress(address) {
+  if (!address) return '';
+  return `${address.slice(0, 4)}...${address.slice(-3)}`;
+}
+
+// Validate token holder
+async function validateHolder(address) {
+  try {
+    const res = await fetch('https://mainnet.helius-rpc.com/?api-key=c93e5dea-5c54-48b4-bb7a-9b9aef4cc41c', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTokenAccountsByOwner',
+        params: [address, { mint: TOKEN_MINT }, { encoding: 'jsonParsed' }]
+      })
+    });
+
+    const data = await res.json();
+    return data.result?.value?.some(acc => acc.account.data.parsed.info.tokenAmount.uiAmount > 0) || false;
+  } catch (err) {
+    console.error('Validation error:', err);
+    return false;
+  }
+}
+
+// Validate wallet address
+async function validateAddress() {
+  const input = document.getElementById('walletAddress');
+  const msg = document.getElementById('message');
+  const address = input.value.trim();
+
+  msg.innerHTML = '';
+
+  if (!address) {
+    showMessage('Please enter a wallet address', 'error');
+    return;
+  }
+
+  if (address.length < 32 || address.length > 44) {
+    showMessage('Invalid wallet address format', 'error');
+    return;
+  }
+
+  // Check if address is already a winner
+  if (recentWinners.includes(address)) {
+    showMessage('This address has already won and cannot participate again', 'error');
+    return;
+  }
+
+  showMessage('Validating token holder status...', 'info');
+
+  const isHolder = await validateHolder(address);
+  if (isHolder) {
+    currentUser = address;
+    showMessage('Congrats anda adalah holder', 'success');
+    await addUserToSystem(currentUser);
+    updateDisplay();
+  } else {
+    showMessage('You not a holder', 'error');
+  }
+}
+
+function showMessage(text, type) {
+  const msg = document.getElementById('message');
+  msg.innerHTML = `<div class="message ${type}-message">${text}</div>`;
+}
+
+async function addUserToSystem(address) {
+  // Check if address is already in the system or is a winner
+  if (recentWinners.includes(address) || 
+      wheelSlots.includes(address) || 
+      waitingQueue.includes(address)) {
+    return;
+  }
+
+  const emptySlot = wheelSlots.findIndex(slot => !slot);
+  if (emptySlot !== -1) {
+    wheelSlots[emptySlot] = address;
+  } else {
+    waitingQueue.push(address);
+  }
+
+  await saveGameState();
+}
+
+function startCountdown() {
+  if (spinInterval) clearInterval(spinInterval);
+
+  spinInterval = setInterval(() => {
+    countdownTimer--;
+    updateCountdownDisplay();
+
+    if (countdownTimer <= 0) {
+      performSpin();
+      countdownTimer = SPIN_INTERVAL;
+    }
+  }, 1000);
+}
+
+function updateCountdownDisplay() {
+  const minutes = Math.floor(countdownTimer / 60).toString().padStart(2, '0');
+  const seconds = (countdownTimer % 60).toString().padStart(2, '0');
+  document.getElementById('countdownTimer').textContent = `${minutes}:${seconds}`;
+}
+
+async function performSpin() {
+  const filledSlots = wheelSlots.filter(Boolean);
+  if (filledSlots.length === 0) return;
+
+  // Update spin timestamp
+  await updateSpinTimestamp();
+
+  // Animate wheel spinning
+  const totalRotation = Math.PI * 8 + Math.random() * Math.PI * 2; // 4 full rotations plus random
+  const duration = 3000; // 3 seconds
+
+  gsap.to({ rotation: wheelRotation }, {
+    rotation: wheelRotation + totalRotation,
+    duration: duration / 1000,
+    ease: "power2.out",
+    onUpdate: function() {
+      wheelRotation = this.targets()[0].rotation;
+      initializeWheel();
     },
-    set: (key, value) => {
-        try {
-            localStorage.setItem(key, JSON.stringify(value));
-        } catch (e) {
-            console.error('Error writing to localStorage:', e);
-        }
+    onComplete: function() {
+      selectWinner();
     }
-};
-
-// Simple Base58 validation for Solana address
-function isValidBase58(address) {
-    const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
-    return BASE58_REGEX.test(address);
+  });
 }
 
-function isValidSolanaAddress(address) {
-    // Solana address is base58 and length usually 32-44 characters
-    if (!address) return false;
-    if (address.length < 32 || address.length > 44) return false;
-    if (!isValidBase58(address)) return false;
-    return true;
+async function selectWinner() {
+  const filledSlots = wheelSlots.filter(Boolean);
+  if (filledSlots.length === 0) return;
+
+  // Determine winner based on wheel position
+  const normalizedRotation = (wheelRotation % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
+  const winnerSlotIndex = Math.floor(normalizedRotation / anglePerSlot);
+  const winner = wheelSlots[winnerSlotIndex];
+
+  if (winner) {
+    // Add to winners
+    recentWinners.push(winner);
+
+    // Remove from wheel
+    wheelSlots[winnerSlotIndex] = null;
+
+    // Fill empty slot from queue (excluding winners)
+    const availableQueueUsers = waitingQueue.filter(addr => !recentWinners.includes(addr));
+    if (availableQueueUsers.length > 0) {
+      const nextUser = availableQueueUsers[0];
+      wheelSlots[winnerSlotIndex] = nextUser;
+      waitingQueue = waitingQueue.filter(addr => addr !== nextUser);
+    }
+
+    // Remove winner from queue if they were there
+    waitingQueue = waitingQueue.filter(addr => addr !== winner);
+
+    await saveGameState();
+    updateDisplay();
+    alert(`🎉 Congratulations! Winner: ${formatAddress(winner)}`);
+  }
 }
 
-// Solana token balance checker
-async function checkTokenBalance(walletAddress) {
-    console.log("Checking balance for:", walletAddress);
-console.log("Using mint:", MINT_ADDRESS);
-console.log("Sending request to:", SOLANA_RPC);
-
-    try {
-        const response = await fetch(SOLANA_RPC, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'getTokenAccountsByOwner',
-                params: [
-                    walletAddress,
-                    {
-                        mint: MINT_ADDRESS
-                    },
-                    {
-                        encoding: 'jsonParsed'
-                    }
-                ]
-            })
-        });
-
-        const data = await response.json();
-        console.log('RPC response:', data); // Debugging response
-        
-        if (data.error) {
-            throw new Error(data.error.message);
-        }
-
-        if (data.result && data.result.value && data.result.value.length > 0) {
-            const tokenAccount = data.result.value[0];
-            const balance = parseFloat(tokenAccount.account.data.parsed.info.tokenAmount.uiAmount);
-            return balance > 0;
-        }
-
-        return false;
-    } catch (error) {
-        console.error('Error checking token balance:', error);
-        return false;
-    }
-    
+function updateDisplay() {
+  initializeWheel();
+  updateStats();
+  updateLists();
 }
 
-// Main page functionality
-if (document.getElementById('checkEligibility')) {
-    const walletAddressInput = document.getElementById('walletAddress');
-    const checkButton = document.getElementById('checkEligibility');
-    const submitButton = document.getElementById('submitAddress');
-    const resultDiv = document.getElementById('result');
-    const validHolderDiv = document.getElementById('validHolder');
-    const invalidHolderDiv = document.getElementById('invalidHolder');
-    const loadingDiv = document.getElementById('loading');
-
-    checkButton.addEventListener('click', async () => {
-        const address = walletAddressInput.value.trim();
-        
-        if (!address) {
-            alert('Please enter a wallet address');
-            return;
-        }
-
-        if (!isValidSolanaAddress(address)) {
-            alert('Please enter a valid Solana wallet address');
-            return;
-        }
-
-        loadingDiv.style.display = 'block';
-        resultDiv.style.display = 'none';
-        checkButton.disabled = true;
-
-        try {
-            const isHolder = await checkTokenBalance(address);
-            
-            loadingDiv.style.display = 'none';
-            resultDiv.style.display = 'block';
-
-            if (isHolder) {
-                validHolderDiv.style.display = 'block';
-                invalidHolderDiv.style.display = 'none';
-            } else {
-                validHolderDiv.style.display = 'none';
-                invalidHolderDiv.style.display = 'block';
-            }
-        } catch (error) {
-            loadingDiv.style.display = 'none';
-            alert('Error checking eligibility. Please try again.');
-            console.error(error);
-        } finally {
-            checkButton.disabled = false;
-        }
-    });
-
-    submitButton.addEventListener('click', async () => {
-        const address = walletAddressInput.value.trim();
-
-        if (!address) {
-            alert('Please enter a wallet address');
-            return;
-        }
-
-        if (!isValidSolanaAddress(address)) {
-            alert('Please enter a valid Solana wallet address');
-            return;
-        }
-
-        // Double-check token holder status before submit
-        const isHolder = await checkTokenBalance(address);
-        if (!isHolder) {
-            alert('Address is not a token holder!');
-            return;
-        }
-
-        const holders = storage.get(STORAGE_KEYS.HOLDERS) || [];
-
-        if (holders.includes(address)) {
-            alert('This address is already registered!');
-            return;
-        }
-
-        holders.push(address);
-        storage.set(STORAGE_KEYS.HOLDERS, holders);
-
-        alert('Address successfully registered! Redirecting to Lucky Wheel...');
-        window.location.href = 'luckywheel.html';
-    });
+function updateStats() {
+  const participants = wheelSlots.filter(Boolean).length + waitingQueue.length;
+  document.getElementById('participantCount').textContent = participants;
+  document.getElementById('queueCount').textContent = waitingQueue.length;
+  document.getElementById('totalWinnerCount').textContent = recentWinners.length;
 }
 
-// Lucky Wheel functionality
-if (document.getElementById('wheelCanvas')) {
-    const canvas = document.getElementById('wheelCanvas');
-    const ctx = canvas.getContext('2d');
-    const spinButton = document.getElementById('spinButton');
-    const countdownElement = document.getElementById('countdown');
-    
-    let isSpinning = false;
-    let currentRotation = 0;
-    let countdownTimer;
+function updateLists() {
+  // Update waiting queue list
+  const queueContainer = document.getElementById('waitingQueueList');
+  const queueHTML = [];
+  
+  // Show actual queue first (excluding winners)
+  const displayQueue = waitingQueue.filter(addr => !recentWinners.includes(addr));
+  displayQueue.forEach((address, index) => {
+    queueHTML.push(`<div class="list-item">
+      <span class="list-number">${index + 1}.</span>
+      <span class="list-address">${formatAddress(address)}</span>
+    </div>`);
+  });
+  
+  // Fill remaining slots with placeholders
+  for (let i = displayQueue.length; i < 11; i++) {
+    queueHTML.push(`<div class="list-item">
+      <span class="list-number">${i + 1}.</span>
+      <span class="list-address">-</span>
+    </div>`);
+  }
+  
+  queueContainer.innerHTML = queueHTML.join('');
 
-    // Wheel colors
-    const colors = [
-        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-        '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
-        '#F8C471', '#82E0AA', '#F1948A', '#85C1E9', '#D5A6BD',
-        '#A9CCE3', '#A3E4D7', '#D5DBDB', '#FADBD8', '#E8DAEF'
-    ];
-
-    function drawWheel(holders) {
-        const centerX = canvas.width / 2;
-        const centerY = canvas.height / 2;
-        const radius = 180;
-        
-        if (!holders || holders.length === 0) {
-            // Draw empty wheel
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-            ctx.fillStyle = '#f0f0f0';
-            ctx.fill();
-            ctx.strokeStyle = '#ddd';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            
-            ctx.fillStyle = '#666';
-            ctx.font = '16px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('No holders yet', centerX, centerY);
-            return;
-        }
-
-        const anglePerSlice = (2 * Math.PI) / Math.min(holders.length, 20);
-        const displayHolders = holders.slice(0, 20);
-        
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw wheel slices
-        displayHolders.forEach((holder, index) => {
-            const startAngle = currentRotation + index * anglePerSlice;
-            const endAngle = currentRotation + (index + 1) * anglePerSlice;
-            
-            // Draw slice
-            ctx.beginPath();
-            ctx.moveTo(centerX, centerY);
-            ctx.arc(centerX, centerY, radius, startAngle, endAngle);
-            ctx.closePath();
-            ctx.fillStyle = colors[index % colors.length];
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            
-            // Draw text
-            const textAngle = startAngle + anglePerSlice / 2;
-            const textX = centerX + Math.cos(textAngle) * (radius * 0.7);
-            const textY = centerY + Math.sin(textAngle) * (radius * 0.7);
-            
-            ctx.save();
-            ctx.translate(textX, textY);
-            ctx.rotate(textAngle + Math.PI / 2);
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 10px Arial';
-            ctx.textAlign = 'center';
-            ctx.shadowColor = 'rgba(0,0,0,0.5)';
-            ctx.shadowOffsetX = 1;
-            ctx.shadowOffsetY = 1;
-            const shortAddress = holder.slice(0, 4) + '...' + holder.slice(-4);
-            ctx.fillText(shortAddress, 0, 0);
-            ctx.restore();
-        });
-    }
-
-    function spinWheel() {
-        if (isSpinning) return;
-        
-        const holders = storage.get(STORAGE_KEYS.HOLDERS) || [];
-        if (holders.length === 0) {
-            alert('No holders to spin!');
-            return;
-        }
-
-        isSpinning = true;
-        spinButton.style.pointerEvents = 'none';
-        spinButton.style.opacity = '0.5';
-        
-        const displayHolders = holders.slice(0, 20);
-        const spinDegrees = 1440 + Math.random() * 1440; // 4-8 full rotations
-        const finalRotation = currentRotation + (spinDegrees * Math.PI / 180);
-        
-        // Animation
-        const startTime = Date.now();
-        const duration = 3000; // 3 seconds
-        
-        function animate() {
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            
-            // Easing function for smooth deceleration
-            const easeOut = 1 - Math.pow(1 - progress, 3);
-            currentRotation = currentRotation + (finalRotation - currentRotation) * easeOut;
-            
-            drawWheel(displayHolders);
-            
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else {
-                // Determine winner
-                const normalizedRotation = (currentRotation % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-                const pointerAngle = -Math.PI / 2; // Pointer at top
-                const relativeAngle = (pointerAngle - normalizedRotation + 2 * Math.PI) % (2 * Math.PI);
-                const anglePerSlice = (2 * Math.PI) / displayHolders.length;
-                const winnerIndex = Math.floor(relativeAngle / anglePerSlice);
-                const winner = displayHolders[winnerIndex];
-                
-                // Move winners to history and remove from holders
-                const winners = storage.get(STORAGE_KEYS.WINNERS) || [];
-                winners.push({
-                    address: winner,
-                    timestamp: new Date().toISOString(),
-                    spinTime: new Date().toLocaleString()
-                });
-                storage.set(STORAGE_KEYS.WINNERS, winners);
-                
-                // Remove winner from holders
-                const updatedHolders = holders.filter(h => h !== winner);
-                storage.set(STORAGE_KEYS.HOLDERS, updatedHolders);
-                
-                // Update displays
-                updateHoldersList();
-                updateWinnersList();
-                
-                // Show winner
-                setTimeout(() => {
-                    alert(`🎉 Winner: ${winner.slice(0, 8)}...${winner.slice(-8)}`);
-                }, 500);
-                
-                // Reset spin state
-                isSpinning = false;
-                spinButton.style.pointerEvents = 'auto';
-                spinButton.style.opacity = '1';
-                
-                // Update last spin time and restart timer
-                storage.set(STORAGE_KEYS.LAST_SPIN, Date.now());
-                startAutoSpinTimer();
-            }
-        }
-        
-        animate();
-    }
-
-    function updateHoldersList() {
-        const holders = storage.get(STORAGE_KEYS.HOLDERS) || [];
-        const holdersListDiv = document.getElementById('holdersList');
-        const holdersCountSpan = document.getElementById('holdersCount');
-        
-        holdersCountSpan.textContent = holders.length;
-        
-        if (holders.length === 0) {
-            holdersListDiv.innerHTML = '<p class="empty-message">No holders registered yet.</p>';
-        } else {
-            holdersListDiv.innerHTML = holders.map(address => 
-                `<div class="address-item">${address}</div>`
-            ).join('');
-        }
-        
-        drawWheel(holders);
-    }
-
-    function updateWinnersList() {
-        const winners = storage.get(STORAGE_KEYS.WINNERS) || [];
-        const winnersListDiv = document.getElementById('winnersList');
-        const winnersCountSpan = document.getElementById('winnersCount');
-        
-        winnersCountSpan.textContent = winners.length;
-        
-        if (winners.length === 0) {
-            winnersListDiv.innerHTML = '<p class="empty-message">No winners yet.</p>';
-        } else {
-            winnersListDiv.innerHTML = winners.slice().reverse().map(winner => 
-                `<div class="winner-item">
-                    ${winner.address}
-                    <span class="timestamp">${winner.spinTime}</span>
-                </div>`
-            ).join('');
-        }
-    }
-
-    // Countdown timer for next spin
-    function startAutoSpinTimer() {
-        clearInterval(countdownTimer);
-        
-        countdownTimer = setInterval(() => {
-            const lastSpin = storage.get(STORAGE_KEYS.LAST_SPIN) || 0;
-            const now = Date.now();
-            let diff = AUTO_SPIN_INTERVAL - (now - lastSpin);
-            
-            if (diff <= 0) {
-                spinWheel();
-                diff = AUTO_SPIN_INTERVAL;
-            }
-            
-            const minutes = Math.floor(diff / 60000);
-            const seconds = Math.floor((diff % 60000) / 1000);
-            countdownElement.textContent = `Next spin in: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }, 1000);
-    }
-
-    function initializeWheelPage() {
-        if (!storage.get(STORAGE_KEYS.HOLDERS)) {
-            storage.set(STORAGE_KEYS.HOLDERS, []);
-        }
-        if (!storage.get(STORAGE_KEYS.WINNERS)) {
-            storage.set(STORAGE_KEYS.WINNERS, []);
-        }
-        if (!storage.get(STORAGE_KEYS.LAST_SPIN)) {
-            storage.set(STORAGE_KEYS.LAST_SPIN, 0);
-        }
-
-        updateHoldersList();
-        updateWinnersList();
-        startAutoSpinTimer();
-
-        spinButton.addEventListener('click', spinWheel);
-    }
-
-    initializeWheelPage();
+  // Update recent winners list
+  const winnersContainer = document.getElementById('recentWinnersList');
+  const winnersHTML = [];
+  
+  // Show recent winners (latest first)
+  const displayWinners = recentWinners.slice(-11).reverse();
+  displayWinners.forEach((address, index) => {
+    winnersHTML.push(`<div class="list-item">
+      <span class="list-number">${index + 1}.</span>
+      <span class="list-address">${formatAddress(address)}</span>
+    </div>`);
+  });
+  
+  // Fill remaining slots with placeholders
+  for (let i = displayWinners.length; i < 11; i++) {
+    winnersHTML.push(`<div class="list-item">
+      <span class="list-number">${i + 1}.</span>
+      <span class="list-address">-</span>
+    </div>`);
+  }
+  
+  winnersContainer.innerHTML = winnersHTML.join('');
 }
+
+function openSocialMedia() {
+  // Replace with your social media URL
+  window.open('https://twitter.com/yourhandle', '_blank');
+}
+
+// Event listeners
+document.addEventListener('DOMContentLoaded', async function() {
+  console.log('🔄 Loading application...');
+  
+  // Load game state from database
+  await loadGameState();
+  
+  // Initialize display
+  initializeWheel();
+  updateDisplay();
+  
+  // Start countdown with loaded time
+  startCountdown();
+
+  // Add event listeners
+  document.getElementById('walletAddress').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      validateAddress();
+    }
+  });
+
+  console.log('✅ Application loaded successfully');
+});
+
+// Expose functions to global scope
+window.validateAddress = validateAddress;
+window.openSocialMedia = openSocialMedia;

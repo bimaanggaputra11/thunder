@@ -1,64 +1,113 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lucky Wheel - Check Eligibility</title>
-    <link rel="stylesheet" href="styles.css">
-     <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/index.min.js"></script>
-  <script>
-    window.Buffer = buffer.Buffer;
-  </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lucky Wheel - Token Holder Only</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-    <div class="container">
-        <h1>Lucky Wheel Token Holder</h1>
-        <div class="main-content">
-            <div class="form-container">
-                <h2>Check Your Eligibility</h2>
-                <p>Enter your Solana wallet address to check if you're eligible for the Lucky Wheel</p>
-                
-                <div class="input-group">
-                    <label for="walletAddress">Wallet Address:</label>
-                    <input type="text" id="walletAddress" placeholder="Enter your Solana wallet address" />
-                </div>
-                
-                <button id="checkEligibility" class="btn primary">Check Eligibility</button>
-                
-                <div id="result" class="result-container" style="display: none;">
-                    <div id="validHolder" class="success-message" style="display: none;">
-                        <p>✅ Congratulations! You are a valid token holder.</p>
-                        <button id="submitAddress" class="btn primary">Submit</button>
-                    </div>
-                    <div id="invalidHolder" class="error-message" style="display: none;">
-                        <p>❌ You are not a holder of the required token.</p>
-                    </div>
-                </div>
-                
-                <div id="loading" class="loading" style="display: none;">
-                    <p>Checking eligibility...</p>
-                </div>
-            </div>
-            
-            <div class="info-container">
-                <h3>Token Information</h3>
-                <p><strong>Required Token:</strong></p>
-                <p class="token-address">74x7Bu7JUAMGZ4G7v741pzSu7A7DvCxhnCeFoeyGpump</p>
-                <p><strong>Network:</strong> Solana Mainnet</p>
-            </div>
-        </div>
-        
-        <div class="navigation">
-            <a href="luckywheel.html" class="btn secondary">View Lucky Wheel</a>
-        </div>
+  <div class="container">
+    <!-- Header with Logo -->
+    <div class="header-section">
+      <div class="logo">Logo</div>
+      <div class="title-section">
+        <h1>Lucky wheel</h1>
+        <p>Exclusive for token holder only</p>
+      </div>
     </div>
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.0/web3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
-        <script>
-        // Make Buffer available globally
-        window.Buffer = buffer.Buffer;
-    </script>
-    <script src="script.js"></script>
+
+    <!-- Social Media Button -->
+    <div class="social-section">
+      <button class="social-button" onclick="openSocialMedia()">social media logo</button>
+    </div>
+
+    <!-- Validation Section -->
+    <div class="validation-card">
+      <h2>Enter Your Wallet Address</h2>
+      <p>Only verified token holders can participate</p>
+      <div class="input-group">
+        <label for="walletAddress">Solana Wallet Address :</label>
+        <input
+          type="text"
+          id="walletAddress"
+          placeholder="Enter your wallet address..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <button class="verify-btn" onclick="validateAddress()">Verify</button>
+      <div id="message"></div>
+    </div>
+
+    <!-- Wheel Section -->
+    <div class="wheel-section">
+      <div class="wheel-container">
+        <canvas id="wheelCanvas" width="300" height="300"></canvas>
+      </div>
+    </div>
+
+    <!-- Countdown Timer -->
+    <div class="countdown-section">
+      <div class="countdown-label">Next spin in</div>
+      <div class="countdown-timer" id="countdownTimer">05:00</div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-section">
+      <div class="stat-card">
+        <h3>Participant</h3>
+        <div class="stat-number" id="participantCount">0</div>
+      </div>
+      <div class="stat-card">
+        <h3>Queue</h3>
+        <div class="stat-number" id="queueCount">0</div>
+      </div>
+      <div class="stat-card">
+        <h3>Total winner</h3>
+        <div class="stat-number" id="totalWinnerCount">0</div>
+      </div>
+    </div>
+
+    <!-- Lists -->
+    <div class="lists-section">
+      <div class="list-card">
+        <h3>Waiting Queue</h3>
+        <div class="list-container" id="waitingQueueList">
+          <div class="list-item"><span class="list-number">1.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">2.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">3.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">4.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">5.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">6.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">7.</span><span class="list-address">-</span></div>
+          <div class="list-item"><span class="list-number">8.</span><span class="list-address">-</span></div>
+          <div class="list-item"><span class="list-number">9.</span><span class="list-address">-</span></div>
+          <div class="list-item"><span class="list-number">10.</span><span class="list-address">-</span></div>
+          <div class="list-item"><span class="list-number">11.</span><span class="list-address">-</span></div>
+        </div>
+      </div>
+      <div class="list-card">
+        <h3>Recent winners</h3>
+        <div class="list-container" id="recentWinnersList">
+          <div class="list-item"><span class="list-number">1.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">2.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">3.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">4.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">5.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">6.</span><span class="list-address">address holder</span></div>
+          <div class="list-item"><span class="list-number">7.</span><span class="list-address">-</span></div>
+          <div class="list-item"><span class="list-number">8.</span><span class="list-address">-</span></div>
+          <div class="list-item"><span class="list-number">9.</span><span class="list-address">-</span></div>
+          <div class="list-item"><span class="list-number">10.</span><span class="list-address">-</span></div>
+          <div class="list-item"><span class="list-number">11.</span><span class="list-address">-</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
 </body>
 </html>

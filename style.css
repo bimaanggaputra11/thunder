@@ -1,0 +1,289 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Arial', sans-serif;
+  background: linear-gradient(135deg, #8b9467 0%, #6d7c3e 100%);
+  min-height: 100vh;
+  color: #333;
+  padding: 20px;
+}
+
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Header with Logo */
+.header-section {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 10px;
+}
+
+.logo {
+  width: 60px;
+  height: 60px;
+  background: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: #333;
+  font-size: 14px;
+}
+
+.title-section h1 {
+  color: white;
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 0;
+}
+
+.title-section p {
+  color: rgba(255,255,255,0.9);
+  font-size: 1rem;
+  margin: 0;
+}
+
+/* Social Media Section */
+.social-section {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.social-button {
+  background: white;
+  color: #333;
+  padding: 10px 30px;
+  border-radius: 25px;
+  text-decoration: none;
+  font-weight: bold;
+  cursor: pointer;
+  border: none;
+  transition: transform 0.2s;
+}
+
+.social-button:hover {
+  transform: translateY(-2px);
+}
+
+/* Validation Section */
+.validation-card {
+  background: white;
+  border-radius: 20px;
+  padding: 30px;
+  text-align: center;
+  box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+}
+
+.validation-card h2 {
+  color: #333;
+  margin-bottom: 10px;
+  font-size: 1.5rem;
+}
+
+.validation-card p {
+  color: #666;
+  margin-bottom: 20px;
+}
+
+.input-group {
+  margin: 20px 0;
+}
+
+.input-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #555;
+  text-align: left;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.verify-btn {
+  background: #1565c0;
+  color: white;
+  border: none;
+  padding: 12px 30px;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.verify-btn:hover {
+  background: #0d47a1;
+}
+
+/* Message styles */
+.message {
+  margin-top: 15px;
+  padding: 10px;
+  border-radius: 8px;
+  font-weight: bold;
+}
+
+.success-message {
+  background: #e8f5e8;
+  color: #2e7d32;
+  border: 1px solid #4caf50;
+}
+
+.error-message {
+  background: #ffebee;
+  color: #c62828;
+  border: 1px solid #f44336;
+}
+
+.info-message {
+  background: #e3f2fd;
+  color: #1976d2;
+  border: 1px solid #2196f3;
+}
+
+/* Wheel Section */
+.wheel-section {
+  background: white;
+  border-radius: 20px;
+  padding: 20px;
+  text-align: center;
+}
+
+.wheel-container {
+  margin: 20px 0;
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+#wheelCanvas {
+  border: 4px solid #333;
+  border-radius: 50%;
+  background: white;
+}
+
+/* Countdown Timer */
+.countdown-section {
+  background: white;
+  border-radius: 15px;
+  padding: 15px;
+  margin: 20px 0;
+  text-align: center;
+}
+
+.countdown-timer {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #333;
+}
+
+.countdown-label {
+  color: #666;
+  margin-bottom: 10px;
+}
+
+/* Stats Section */
+.stats-section {
+  display: flex;
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.stat-card {
+  flex: 1;
+  background: white;
+  border-radius: 15px;
+  padding: 15px;
+  text-align: center;
+}
+
+.stat-card h3 {
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: 5px;
+}
+
+.stat-number {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #333;
+}
+
+/* Lists Section */
+.lists-section {
+  display: flex;
+  gap: 20px;
+}
+
+.list-card {
+  flex: 1;
+  background: white;
+  border-radius: 15px;
+  padding: 20px;
+}
+
+.list-card h3 {
+  color: #333;
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.list-container {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.list-number {
+  width: 30px;
+  color: #666;
+  font-weight: bold;
+}
+
+.list-address {
+  flex: 1;
+  color: #333;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .lists-section {
+    flex-direction: column;
+  }
+  
+  .stats-section {
+    flex-wrap: wrap;
+  }
+  
+  .header-section {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .title-section h1 {
+    font-size: 1.5rem;
+  }
+}
