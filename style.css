@@ -6,10 +6,10 @@
 
 body {
   font-family: 'Arial', sans-serif;
-  background: linear-gradient(135deg, #808860 0%, #6d7c3e 100%);
+  background: linear-gradient(135deg,#18423d 0%, #18423d 100%);
   min-height: 100vh;
-  color: #333;
-  padding: 20px;
+  color: #18423d;
+  
 }
 
 .container {
@@ -24,14 +24,17 @@ body {
 .header-section {
   display: flex;
   align-items: center;
-  gap: 15px;
   margin-bottom: 10px;
+  justify-content: center;
 }
 
+.header-section img{
+ margin: 0;
+}
 .logo {
   width: 60px;
   height: 60px;
-  background: url(logowithoutbg.png);
+  
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -87,7 +90,7 @@ body {
 
 /* Validation Section */
 .validation-card {
-  background: rgb(153, 235, 153);
+  background: rgb(255, 255, 255);
   border-radius: 20px;
   padding: 30px;
   text-align: center;

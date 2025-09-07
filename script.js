@@ -21,6 +21,8 @@ let wheelRotation = 0;
 let lastSpinTimestamp = null;
 let isSpinning = false; // PERBAIKAN: Tambahkan lock untuk mencegah spin bersamaan
 let realTimeSubscription = null; // PERBAIKAN: Untuk real-time updates
+let gameInitialized = false; // PERBAIKAN: Flag untuk memastikan game sudah terinisialisasi
+let countdownInterval = null; // PERBAIKAN: Pisahkan interval countdown
 
 // Cek apakah Supabase tersedia
 if (!supabase) {
@@ -258,13 +260,20 @@ async function saveGameState() {
       }
     }
 
-    // Save last spin timestamp
+    // PERBAIKAN: Simpan waktu yang akurat dalam database
     if (lastSpinTimestamp) {
       await supabase.from('settings').upsert([{ 
         key: 'last_spin_timestamp', 
         value: String(lastSpinTimestamp) 
       }], { onConflict: 'key' });
     }
+
+    // PERBAIKAN: Simpan next spin time untuk sinkronisasi yang lebih akurat
+    const nextSpinTime = lastSpinTimestamp + (SPIN_INTERVAL * 1000);
+    await supabase.from('settings').upsert([{ 
+      key: 'next_spin_time', 
+      value: String(nextSpinTime) 
+    }], { onConflict: 'key' });
 
     console.log('✅ Game state saved to database');
   } catch (error) {
@@ -312,56 +321,83 @@ async function loadGameState() {
     const allQueue = queueData ? queueData.map(q => q.address) : [];
     waitingQueue = [...new Set(allQueue.filter(addr => !recentWinners.includes(addr)))];
 
-    // Load last spin timestamp
+    // PERBAIKAN: Load dan sinkronisasi waktu dengan lebih akurat
     const { data: timestampData } = await supabase
       .from('settings')
       .select('*')
       .eq('key', 'last_spin_timestamp')
       .maybeSingle();
 
-    if (timestampData?.value) {
+    const { data: nextSpinData } = await supabase
+      .from('settings')
+      .select('*')
+      .eq('key', 'next_spin_time')
+      .maybeSingle();
+
+    if (timestampData?.value && nextSpinData?.value) {
       lastSpinTimestamp = parseInt(timestampData.value);
-      calculateRemainingTime();
+      const nextSpinTime = parseInt(nextSpinData.value);
+      
+      // PERBAIKAN: Hitung countdown berdasarkan next spin time
+      const now = Date.now();
+      const remaining = nextSpinTime - now;
+      
+      if (remaining > 0) {
+        countdownTimer = Math.floor(remaining / 1000);
+      } else {
+        // Jika waktu sudah lewat, set untuk spin segera
+        countdownTimer = 0;
+        console.log('⏰ Spin time has passed, will spin immediately');
+      }
     } else {
       // If no timestamp exists, set current time as last spin
-      lastSpinTimestamp = Date.now();
+      const now = Date.now();
+      lastSpinTimestamp = now;
       countdownTimer = SPIN_INTERVAL;
-      await saveGameState();
+      
+      // Save initial timestamp
+      await supabase.from('settings').upsert([
+        { key: 'last_spin_timestamp', value: String(now) },
+        { key: 'next_spin_time', value: String(now + (SPIN_INTERVAL * 1000)) }
+      ], { onConflict: 'key' });
     }
 
-    console.log('✅ Game state loaded from database');
+    console.log('✅ Game state loaded from database', {
+      lastSpinTimestamp: new Date(lastSpinTimestamp).toLocaleTimeString(),
+      countdownTimer: `${Math.floor(countdownTimer / 60)}:${(countdownTimer % 60).toString().padStart(2, '0')}`,
+      wheelParticipants: wheelSlots.filter(Boolean).length,
+      queueLength: waitingQueue.length,
+      winnersCount: recentWinners.length
+    });
   } catch (error) {
     console.error('❌ Failed to load game state:', error);
   }
 }
 
-function calculateRemainingTime() {
-  if (!lastSpinTimestamp) {
-    countdownTimer = SPIN_INTERVAL;
-    return;
-  }
-
-  const elapsed = Math.floor((Date.now() - lastSpinTimestamp) / 1000);
-  countdownTimer = Math.max(0, SPIN_INTERVAL - elapsed);
-  
-  if (countdownTimer === 0) {
-    // If time has passed, perform spin immediately
-    setTimeout(performSpin, 1000);
-    countdownTimer = SPIN_INTERVAL;
-  }
-}
-
+// PERBAIKAN: Fungsi untuk update spin timestamp yang lebih akurat
 async function updateSpinTimestamp() {
   if (!supabase) {
     console.error('❌ Supabase client tidak tersedia');
     return;
   }
 
-  lastSpinTimestamp = Date.now();
-  await supabase.from('settings').upsert([{ 
-    key: 'last_spin_timestamp', 
-    value: String(lastSpinTimestamp) 
-  }], { onConflict: 'key' });
+  const now = Date.now();
+  lastSpinTimestamp = now;
+  const nextSpinTime = now + (SPIN_INTERVAL * 1000);
+  
+  try {
+    await supabase.from('settings').upsert([
+      { key: 'last_spin_timestamp', value: String(now) },
+      { key: 'next_spin_time', value: String(nextSpinTime) }
+    ], { onConflict: 'key' });
+    
+    console.log('⏰ Spin timestamp updated:', {
+      lastSpin: new Date(now).toLocaleTimeString(),
+      nextSpin: new Date(nextSpinTime).toLocaleTimeString()
+    });
+  } catch (error) {
+    console.error('❌ Failed to update spin timestamp:', error);
+  }
 }
 
 // ==================== WHEEL FUNCTIONS ====================
@@ -582,17 +618,36 @@ async function addUserToSystem(address) {
   await saveGameState();
 }
 
-// ==================== SPIN FUNCTIONS ====================
+// ==================== COUNTDOWN FUNCTIONS ====================
+// PERBAIKAN: Pisahkan countdown logic
 function startCountdown() {
-  if (spinInterval) clearInterval(spinInterval);
+  // Clear existing countdown
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+  }
 
-  spinInterval = setInterval(() => {
+  console.log('⏰ Starting countdown with', countdownTimer, 'seconds remaining');
+
+  countdownInterval = setInterval(() => {
     countdownTimer--;
     updateCountdownDisplay();
 
+    console.log('⏰ Countdown:', countdownTimer, 'seconds remaining');
+
+    // PERBAIKAN: Cek apakah sudah waktunya spin dan ada peserta
     if (countdownTimer <= 0) {
-      performSpin();
-      countdownTimer = SPIN_INTERVAL;
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+      
+      const filledSlots = wheelSlots.filter(Boolean);
+      if (filledSlots.length > 0 && !isSpinning) {
+        console.log('⏰ Time up! Starting spin with', filledSlots.length, 'participants');
+        performSpin();
+      } else {
+        console.log('⚠️ Time up but no participants or already spinning, resetting timer');
+        countdownTimer = SPIN_INTERVAL;
+        startCountdown();
+      }
     }
   }, 1000);
 }
@@ -606,7 +661,10 @@ function updateCountdownDisplay() {
   }
 }
 
+// ==================== SPIN FUNCTIONS ====================
 async function performSpin() {
+  console.log('🎪 performSpin called - isSpinning:', isSpinning);
+  
   // PERBAIKAN: Prevent multiple simultaneous spins
   if (isSpinning) {
     console.log('⚠️ Spin already in progress, skipping');
@@ -614,19 +672,25 @@ async function performSpin() {
   }
 
   const filledSlots = wheelSlots.filter(Boolean);
-  if (filledSlots.length === 0) return;
+  if (filledSlots.length === 0) {
+    console.log('⚠️ No participants for spinning');
+    countdownTimer = SPIN_INTERVAL;
+    startCountdown();
+    return;
+  }
 
   // PERBAIKAN: Try to acquire spin lock
   const lockAcquired = await acquireSpinLock();
-  if (!lockAcquired) {
+  if (!lockAcquired && supabase) {
     console.log('⚠️ Could not acquire spin lock, another instance is spinning');
     return;
   }
 
   isSpinning = true;
+  console.log('🎪 Starting spin with', filledSlots.length, 'participants');
 
   try {
-    // Update spin timestamp
+    // Update spin timestamp first
     await updateSpinTimestamp();
 
     // Check if GSAP is available
@@ -647,10 +711,11 @@ async function performSpin() {
     const totalRotation = spins * 2 * Math.PI + randomFinalAngle;
     const duration = 3000 + Math.random() * 2000; // 3-5 seconds for more suspense
 
-    console.log('🎪 Starting spin:', {
+    console.log('🎪 Spin parameters:', {
       spins: spins.toFixed(1),
       finalAngle: (randomFinalAngle * 180 / Math.PI).toFixed(1) + '°',
-      duration: (duration / 1000).toFixed(1) + 's'
+      duration: (duration / 1000).toFixed(1) + 's',
+      totalRotation: totalRotation.toFixed(2)
     });
 
     // Show spinning message
@@ -666,6 +731,7 @@ async function performSpin() {
         initializeWheel();
       },
       onComplete: function() {
+        console.log('🎪 Spin animation completed');
         // Clear spinning message
         const msg = document.getElementById('message');
         if (msg && msg.innerHTML.includes('spinning')) {
@@ -677,11 +743,16 @@ async function performSpin() {
   } catch (error) {
     console.error('❌ Error during spin:', error);
     showMessage('Spin failed. Please try again.', 'error');
+    
+    // Reset timer if spin failed
+    countdownTimer = SPIN_INTERVAL;
+    startCountdown();
   } finally {
-    // PERBAIKAN: Always release lock and reset spinning flag
+    // PERBAIKAN: Always release lock and reset spinning flag after delay
     setTimeout(async () => {
       isSpinning = false;
       await releaseSpinLock();
+      console.log('🎪 Spin completed, lock released');
     }, 1000);
   }
 }
@@ -739,7 +810,12 @@ async function highlightWinningSlot(slotIndex) {
 
 async function selectWinner() {
   const filledSlots = wheelSlots.filter(Boolean);
-  if (filledSlots.length === 0) return;
+  if (filledSlots.length === 0) {
+    console.log('⚠️ No participants to select winner from');
+    countdownTimer = SPIN_INTERVAL;
+    startCountdown();
+    return;
+  }
 
   // PERBAIKAN: Determine winner based on wheel position relative to TOP pointer (12 o'clock)
   // Normalize rotation to 0-2π range
@@ -757,7 +833,8 @@ async function selectWinner() {
     normalizedRotation: (normalizedRotation * 180 / Math.PI).toFixed(1) + '°',
     pointerAngle: (pointerAngle * 180 / Math.PI).toFixed(1) + '°',
     winnerSlotIndex,
-    winner: winner ? formatAddress(winner) : 'Empty slot'
+    winner: winner ? formatAddress(winner) : 'Empty slot',
+    filledSlots: filledSlots.length
   });
 
   if (winner) {
@@ -810,6 +887,10 @@ async function selectWinner() {
     console.log('⚠️ No winner - empty slot selected');
     showMessage('Spin landed on empty slot, spinning again in next cycle', 'info');
   }
+
+  // PERBAIKAN: Always reset countdown after spin
+  countdownTimer = SPIN_INTERVAL;
+  startCountdown();
 }
 
 // ==================== DISPLAY FUNCTIONS ====================
@@ -916,9 +997,9 @@ function openSocialMedia() {
 // ==================== CLEANUP FUNCTIONS ====================
 // PERBAIKAN: Tambahkan cleanup functions
 function cleanup() {
-  if (spinInterval) {
-    clearInterval(spinInterval);
-    spinInterval = null;
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
   }
   
   if (realTimeSubscription) {
@@ -948,9 +1029,64 @@ window.addEventListener('unhandledrejection', function(event) {
   showMessage('A network error occurred. Please check your connection.', 'error');
 });
 
+// ==================== INITIALIZATION ====================
+// PERBAIKAN: Improved initialization process
+async function initializeGame() {
+  if (gameInitialized) {
+    console.log('⚠️ Game already initialized');
+    return;
+  }
+
+  console.log('🔄 Initializing game...');
+  gameInitialized = true;
+
+  try {
+    // Initialize components step by step dengan error handling
+    await initializeSpinLock();
+    console.log('✅ Spin lock initialized');
+
+    await setupRealTimeSync();
+    console.log('✅ Real-time sync initialized');
+
+    // Load game state from database
+    await loadGameState();
+    console.log('✅ Game state loaded');
+
+    // Initialize display
+    initializeWheel();
+    updateDisplay();
+
+    // PERBAIKAN: Start countdown only if not already running
+    if (!countdownInterval) {
+      console.log('⏰ Starting countdown timer');
+      startCountdown();
+    }
+
+    console.log('✅ Game initialization completed successfully');
+    showMessage('Game loaded successfully! 🎉', 'success');
+
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to initialize game:', error);
+    showMessage('Failed to load game. Some features may not work properly.', 'error');
+    
+    // Initialize with defaults if loading fails
+    wheelSlots = Array(WHEEL_SLOTS).fill(null);
+    waitingQueue = [];
+    recentWinners = [];
+    countdownTimer = SPIN_INTERVAL;
+    lastSpinTimestamp = Date.now();
+    
+    // Still try to start countdown
+    startCountdown();
+    
+    return false;
+  }
+}
+
 // ==================== EVENT LISTENERS ====================
 document.addEventListener('DOMContentLoaded', async function() {
-  console.log('🔄 Loading application...');
+  console.log('🔄 DOM loaded, starting application...');
   
   // PERBAIKAN: Show loading state during initialization
   const container = document.querySelector('.container');
@@ -960,43 +1096,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Tunggu sedikit untuk memastikan semua library dimuat
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    // PERBAIKAN: Initialize components step by step dengan error handling
-    try {
-      await initializeSpinLock();
-      console.log('✅ Spin lock initialized');
-    } catch (error) {
-      console.warn('⚠️ Failed to initialize spin lock:', error.message);
-    }
-    
-    try {
-      await setupRealTimeSync();
-      console.log('✅ Real-time sync initialized');
-    } catch (error) {
-      console.warn('⚠️ Failed to setup real-time sync:', error.message);
-    }
-    
-    // Load game state from database
-    try {
-      await loadGameState();
-      console.log('✅ Game state loaded');
-    } catch (error) {
-      console.error('❌ Failed to load game state:', error);
-      showMessage('Failed to load game data. Some features may not work properly.', 'error');
-      
-      // Initialize with defaults if loading fails
-      wheelSlots = Array(WHEEL_SLOTS).fill(null);
-      waitingQueue = [];
-      recentWinners = [];
-      countdownTimer = SPIN_INTERVAL;
-      lastSpinTimestamp = Date.now();
-    }
-    
-    // Initialize display
-    initializeWheel();
-    updateDisplay();
-    
-    // Start countdown with loaded time
-    startCountdown();
+    // Initialize the game
+    await initializeGame();
 
     // Add event listeners
     const walletInput = document.getElementById('walletAddress');
@@ -1037,27 +1138,28 @@ document.addEventListener('DOMContentLoaded', async function() {
       }
     });
 
-    // PERBAIKAN: Add manual test buttons for debugging
+    // PERBAIKAN: Add manual test buttons for debugging (only if debug mode)
     const debugMode = window.location.hash.includes('debug') || window.location.search.includes('debug');
     if (debugMode) {
       const debugPanel = document.createElement('div');
       debugPanel.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.9); color: white; padding: 15px; border-radius: 8px; z-index: 1000; font-family: monospace; font-size: 12px;';
       debugPanel.innerHTML = `
         <div style="margin-bottom: 10px; font-weight: bold; color: #00ff00;">🔧 DEBUG MODE</div>
-        <button onclick="window.testSpin()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🎪 Force Spin</button>
-        <button onclick="window.addTestUser()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">➕ Add Test User</button>
-        <button onclick="window.logState()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">📊 Log State</button>
+        <button onclick="window.debugFunctions.testSpin()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🎪 Force Spin</button>
+        <button onclick="window.debugFunctions.addTestUser()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">➕ Add Test User</button>
+        <button onclick="window.debugFunctions.logState()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">📊 Log State</button>
         <br>
-        <button onclick="window.setTimer(10)" style="margin: 2px; padding: 5px 8px; font-size: 11px;">⏰ Set 10s</button>
-        <button onclick="window.resetTimer()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔄 Reset Timer</button>
+        <button onclick="window.debugFunctions.setTimer(10)" style="margin: 2px; padding: 5px 8px; font-size: 11px;">⏰ Set 10s</button>
+        <button onclick="window.debugFunctions.resetTimer()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔄 Reset Timer</button>
         <br>
-        <button onclick="window.forceReleaseLock()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔓 Force Release</button>
-        <button onclick="window.checkLockStatus()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔍 Check Lock</button>
+        <button onclick="window.debugFunctions.forceReleaseLock()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔓 Force Release</button>
+        <button onclick="window.debugFunctions.checkLockStatus()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔍 Check Lock</button>
         <div style="margin-top: 8px; font-size: 10px; color: #888;">
           Timer: <span id="debugTimer">--:--</span><br>
           Participants: <span id="debugParticipants">0</span><br>
           Queue: <span id="debugQueue">0</span><br>
-          Winners: <span id="debugWinners">0</span>
+          Winners: <span id="debugWinners">0</span><br>
+          Spinning: <span id="debugSpinning">false</span>
         </div>
       `;
       document.body.appendChild(debugPanel);
@@ -1068,6 +1170,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         const debugParticipants = document.getElementById('debugParticipants');
         const debugQueue = document.getElementById('debugQueue');
         const debugWinners = document.getElementById('debugWinners');
+        const debugSpinning = document.getElementById('debugSpinning');
         
         if (debugTimer) {
           const minutes = Math.floor(countdownTimer / 60).toString().padStart(2, '0');
@@ -1077,47 +1180,77 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (debugParticipants) debugParticipants.textContent = wheelSlots.filter(Boolean).length;
         if (debugQueue) debugQueue.textContent = waitingQueue.length;
         if (debugWinners) debugWinners.textContent = recentWinners.length;
+        if (debugSpinning) debugSpinning.textContent = isSpinning.toString();
       }, 1000);
       
       // Expose debug functions
-      window.testSpin = () => {
-        console.log('🔧 Manual spin triggered');
-        performSpin();
-      };
-      
-      window.addTestUser = () => {
-        const testAddress = 'TEST' + Date.now().toString().slice(-8) + 'a'.repeat(35);
-        wheelSlots[wheelSlots.findIndex(slot => !slot)] = testAddress;
-        updateDisplay();
-        console.log('🔧 Added test user:', formatAddress(testAddress));
-      };
-      
-      window.logState = () => {
-        console.log('🔧 Current game state:', {
-          wheelSlots: wheelSlots.map((slot, i) => `${i}: ${slot ? formatAddress(slot) : 'empty'}`),
-          waitingQueue: waitingQueue.map(addr => formatAddress(addr)),
-          recentWinners: recentWinners.map(addr => formatAddress(addr)),
-          countdownTimer,
-          isSpinning,
-          wheelRotation: wheelRotation.toFixed(2)
-        });
-      };
-      
-      window.setTimer = (seconds) => {
-        countdownTimer = seconds;
-        console.log('🔧 Timer set to', seconds, 'seconds');
-      };
-      
-      window.resetTimer = () => {
-        countdownTimer = SPIN_INTERVAL;
-        console.log('🔧 Timer reset to', SPIN_INTERVAL, 'seconds');
+      window.debugFunctions = {
+        testSpin: () => {
+          console.log('🔧 Manual spin triggered');
+          if (isSpinning) {
+            console.log('⚠️ Already spinning!');
+            return;
+          }
+          performSpin();
+        },
+        
+        addTestUser: () => {
+          const testAddress = 'TEST' + Date.now().toString().slice(-8) + 'a'.repeat(35);
+          const emptySlot = wheelSlots.findIndex(slot => !slot);
+          if (emptySlot !== -1) {
+            wheelSlots[emptySlot] = testAddress;
+          } else {
+            waitingQueue.push(testAddress);
+          }
+          updateDisplay();
+          console.log('🔧 Added test user:', formatAddress(testAddress));
+        },
+        
+        logState: () => {
+          console.log('🔧 Current game state:', {
+            wheelSlots: wheelSlots.map((slot, i) => `${i}: ${slot ? formatAddress(slot) : 'empty'}`),
+            waitingQueue: waitingQueue.map(addr => formatAddress(addr)),
+            recentWinners: recentWinners.map(addr => formatAddress(addr)),
+            countdownTimer,
+            isSpinning,
+            wheelRotation: wheelRotation.toFixed(2),
+            gameInitialized,
+            lastSpinTimestamp: lastSpinTimestamp ? new Date(lastSpinTimestamp).toLocaleTimeString() : 'null'
+          });
+        },
+        
+        setTimer: (seconds) => {
+          countdownTimer = seconds;
+          console.log('🔧 Timer set to', seconds, 'seconds');
+        },
+        
+        resetTimer: () => {
+          countdownTimer = SPIN_INTERVAL;
+          console.log('🔧 Timer reset to', SPIN_INTERVAL, 'seconds');
+        },
+        
+        forceReleaseLock: async () => {
+          await releaseSpinLock();
+          isSpinning = false;
+          console.log('🔧 Spin lock released and spinning flag reset');
+        },
+        
+        checkLockStatus: async () => {
+          if (supabase) {
+            const { data } = await supabase
+              .from('settings')
+              .select('*')
+              .eq('key', 'spin_lock')
+              .maybeSingle();
+            console.log('🔧 Lock status in DB:', data?.value || 'not found');
+          }
+          console.log('🔧 Local spinning flag:', isSpinning);
+        }
       };
       
       console.log('🔧 Debug mode enabled - check the debug panel');
     }
 
-    console.log('✅ Application loaded successfully');
-    showMessage('Application loaded successfully! 🎉', 'success');
   } catch (error) {
     console.error('❌ Failed to load application:', error);
     showMessage('Failed to load application. Please refresh the page.', 'error');
@@ -1127,14 +1260,27 @@ document.addEventListener('DOMContentLoaded', async function() {
   }
 });
 
+// PERBAIKAN: Handle page visibility changes to sync timer
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden && gameInitialized) {
+    console.log('🔄 Page became visible, syncing game state...');
+    // Reload game state when page becomes visible again
+    loadGameState().then(() => {
+      updateDisplay();
+      // Restart countdown if needed
+      if (!countdownInterval) {
+        startCountdown();
+      }
+    });
+  }
+});
+
 // ==================== EXPOSE FUNCTIONS TO GLOBAL SCOPE ====================
 window.validateAddress = validateAddress;
 window.openSocialMedia = openSocialMedia;
 
-// PERBAIKAN: Expose debug functions if needed
-if (window.location.hash.includes('debug')) {
-  window.performSpin = performSpin;
-  window.gameState = () => ({ wheelSlots, waitingQueue, recentWinners, countdownTimer });
+// PERBAIKAN: Expose essential functions for debugging
+if (window.location.hash.includes('debug') || window.location.search.includes('debug')) {
   window.resetGame = async () => {
     if (confirm('Are you sure you want to reset the entire game? This will clear all data.')) {
       wheelSlots = Array(WHEEL_SLOTS).fill(null);
@@ -1142,8 +1288,16 @@ if (window.location.hash.includes('debug')) {
       recentWinners = [];
       countdownTimer = SPIN_INTERVAL;
       lastSpinTimestamp = Date.now();
+      isSpinning = false;
+      
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }
+      
       await saveGameState();
       updateDisplay();
+      startCountdown();
       console.log('🔄 Game reset completed');
     }
   };
