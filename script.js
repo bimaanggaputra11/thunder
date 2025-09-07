@@ -25,7 +25,92 @@ if (!supabase) {
   console.error('❌ Supabase client tidak dapat diinisialisasi. Pastikan library Supabase sudah dimuat.');
 }
 
-// Database functions
+// ==================== UTILITY FUNCTIONS ====================
+function showLoading(element) {
+  if (element && element.classList) {
+    element.classList.add('loading');
+  }
+}
+
+function hideLoading(element) {
+  if (element && element.classList) {
+    element.classList.remove('loading');
+  }
+}
+
+function disableButton(button, text = 'Loading...') {
+  if (button) {
+    button.disabled = true;
+    button.originalText = button.textContent;
+    button.textContent = text;
+  }
+}
+
+function enableButton(button) {
+  if (button) {
+    button.disabled = false;
+    button.textContent = button.originalText || 'Verify';
+  }
+}
+
+function formatAddress(address) {
+  if (!address) return '';
+  return `${address.slice(0, 4)}...${address.slice(-3)}`;
+}
+
+function showMessage(text, type) {
+  const msg = document.getElementById('message');
+  if (msg) {
+    // PERBAIKAN: Hapus message lama dengan smooth transition
+    msg.innerHTML = '';
+    
+    // Tunggu sebentar lalu tampilkan message baru (untuk trigger animation)
+    setTimeout(() => {
+      msg.innerHTML = `<div class="message ${type}-message">${text}</div>`;
+    }, 50);
+    
+    // PERBAIKAN: Auto-hide success/info messages setelah 5 detik
+    if (type === 'success' || type === 'info') {
+      setTimeout(() => {
+        const currentMessage = msg.querySelector('.message');
+        if (currentMessage) {
+          currentMessage.style.opacity = '0';
+          currentMessage.style.transform = 'translateY(-10px)';
+          setTimeout(() => {
+            msg.innerHTML = '';
+          }, 300);
+        }
+      }, 5000);
+    }
+  }
+}
+
+// PERBAIKAN: Animasi untuk perubahan angka
+function animateNumber(element, from, to) {
+  if (from === to) return;
+  
+  const duration = 500; // 0.5 second
+  const startTime = performance.now();
+  
+  function update(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Easing function
+    const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+    const current = Math.round(from + (to - from) * easeOutQuart);
+    
+    element.textContent = current;
+    
+    if (progress < 1) {
+      requestAnimationFrame(update);
+    }
+  }
+  
+  requestAnimationFrame(update);
+}
+
+// ==================== DATABASE FUNCTIONS ====================
 async function saveGameState() {
   if (!supabase) {
     console.error('❌ Supabase client tidak tersedia');
@@ -170,7 +255,7 @@ async function updateSpinTimestamp() {
   }], { onConflict: 'key' });
 }
 
-// Initialize wheel canvas
+// ==================== WHEEL FUNCTIONS ====================
 function initializeWheel() {
   const canvas = document.getElementById('wheelCanvas');
   if (!canvas) {
@@ -192,11 +277,17 @@ function initializeWheel() {
     const startAngle = i * anglePerSlot + wheelRotation;
     const endAngle = (i + 1) * anglePerSlot + wheelRotation;
     
-    // Segment background
+    // Segment background - add alternating colors for better visibility
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, startAngle, endAngle);
     ctx.lineTo(centerX, centerY);
-    ctx.fillStyle = wheelSlots[i] ? '#f0f0f0' : '#ffffff';
+    
+    if (wheelSlots[i]) {
+      // Alternating colors for filled slots
+      ctx.fillStyle = i % 2 === 0 ? '#f8f8f8' : '#e8e8e8';
+    } else {
+      ctx.fillStyle = '#ffffff';
+    }
     ctx.fill();
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 2;
@@ -212,7 +303,7 @@ function initializeWheel() {
       ctx.translate(textX, textY);
       ctx.rotate(textAngle + Math.PI / 2);
       ctx.fillStyle = '#333';
-      ctx.font = '10px Arial';
+      ctx.font = 'bold 10px Arial';
       ctx.textAlign = 'center';
       ctx.fillText(formatAddress(wheelSlots[i]), 0, 0);
       ctx.restore();
@@ -239,22 +330,29 @@ function initializeWheel() {
   ctx.fillStyle = '#333';
   ctx.fill();
 
-  // Draw pointer (triangle pointing to the wheel)
+  // PERBAIKAN: Draw pointer at top (12 o'clock position)
   ctx.beginPath();
-  ctx.moveTo(centerX + radius + 10, centerY);
-  ctx.lineTo(centerX + radius - 10, centerY - 15);
-  ctx.lineTo(centerX + radius - 10, centerY + 15);
+  ctx.moveTo(centerX, centerY - radius - 20); // Top point
+  ctx.lineTo(centerX - 15, centerY - radius - 5); // Left point
+  ctx.lineTo(centerX + 15, centerY - radius - 5); // Right point
   ctx.closePath();
-  ctx.fillStyle = '#333';
+  ctx.fillStyle = '#ff4444'; // Red color for better visibility
+  ctx.fill();
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // PERBAIKAN: Add pointer shadow for depth
+  ctx.beginPath();
+  ctx.moveTo(centerX + 2, centerY - radius - 18);
+  ctx.lineTo(centerX - 13, centerY - radius - 3);
+  ctx.lineTo(centerX + 17, centerY - radius - 3);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fill();
 }
 
-function formatAddress(address) {
-  if (!address) return '';
-  return `${address.slice(0, 4)}...${address.slice(-3)}`;
-}
-
-// Validate token holder
+// ==================== VALIDATION FUNCTIONS ====================
 async function validateHolder(address) {
   try {
     const res = await fetch('https://mainnet.helius-rpc.com/?api-key=c93e5dea-5c54-48b4-bb7a-9b9aef4cc41c', {
@@ -276,10 +374,11 @@ async function validateHolder(address) {
   }
 }
 
-// PERBAIKAN: Validate wallet address dengan pengecekan yang lebih aman
 async function validateAddress() {
   const input = document.getElementById('walletAddress');
   const msg = document.getElementById('message');
+  const verifyBtn = document.querySelector('.verify-btn');
+  const validationCard = document.querySelector('.validation-card');
   
   if (!input || !msg) {
     console.error('❌ Element tidak ditemukan');
@@ -288,15 +387,18 @@ async function validateAddress() {
 
   const address = input.value.trim();
 
+  // Clear previous messages
   msg.innerHTML = '';
 
   if (!address) {
     showMessage('Please enter a wallet address', 'error');
+    input.focus();
     return;
   }
 
   if (address.length < 32 || address.length > 44) {
     showMessage('Invalid wallet address format', 'error');
+    input.focus();
     return;
   }
 
@@ -312,23 +414,39 @@ async function validateAddress() {
     return;
   }
 
+  // Check if address is already in the system
+  if (wheelSlots.includes(address) || waitingQueue.includes(address)) {
+    showMessage('This address is already participating in the game', 'info');
+    return;
+  }
+
+  // Show loading states
+  showLoading(validationCard);
+  disableButton(verifyBtn, 'Validating...');
   showMessage('Validating token holder status...', 'info');
 
-  const isHolder = await validateHolder(address);
-  if (isHolder) {
-    currentUser = address;
-    showMessage('Congrats anda adalah holder', 'success');
-    await addUserToSystem(currentUser);
-    updateDisplay();
-  } else {
-    showMessage('You not a holder', 'error');
-  }
-}
-
-function showMessage(text, type) {
-  const msg = document.getElementById('message');
-  if (msg) {
-    msg.innerHTML = `<div class="message ${type}-message">${text}</div>`;
+  try {
+    const isHolder = await validateHolder(address);
+    
+    if (isHolder) {
+      currentUser = address;
+      showMessage('Congrats anda adalah holder! 🎉', 'success');
+      await addUserToSystem(currentUser);
+      updateDisplay();
+      
+      // Clear input after successful validation
+      input.value = '';
+    } else {
+      showMessage('You are not a token holder ❌', 'error');
+      input.focus();
+    }
+  } catch (error) {
+    console.error('Validation error:', error);
+    showMessage('Validation failed. Please try again.', 'error');
+  } finally {
+    // Hide loading states
+    hideLoading(validationCard);
+    enableButton(verifyBtn);
   }
 }
 
@@ -355,6 +473,7 @@ async function addUserToSystem(address) {
   await saveGameState();
 }
 
+// ==================== SPIN FUNCTIONS ====================
 function startCountdown() {
   if (spinInterval) clearInterval(spinInterval);
 
@@ -432,17 +551,93 @@ async function performSpin() {
   });
 }
 
+// PERBAIKAN: Function untuk highlight winning slot
+async function highlightWinningSlot(slotIndex) {
+  const canvas = document.getElementById('wheelCanvas');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  const radius = 140;
+  const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
+
+  // Highlight animation
+  for (let i = 0; i < 6; i++) {
+    // Redraw wheel
+    initializeWheel();
+    
+    // Draw highlight on winning slot
+    if (i % 2 === 0) { // Flash effect
+      const startAngle = slotIndex * anglePerSlot + wheelRotation;
+      const endAngle = (slotIndex + 1) * anglePerSlot + wheelRotation;
+      
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+      ctx.lineTo(centerX, centerY);
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.7)'; // Gold highlight
+      ctx.fill();
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      
+      // Redraw text on highlighted slot
+      if (wheelSlots[slotIndex]) {
+        const textAngle = startAngle + anglePerSlot / 2;
+        const textX = centerX + Math.cos(textAngle) * (radius * 0.7);
+        const textY = centerY + Math.sin(textAngle) * (radius * 0.7);
+        
+        ctx.save();
+        ctx.translate(textX, textY);
+        ctx.rotate(textAngle + Math.PI / 2);
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(formatAddress(wheelSlots[slotIndex]), 0, 0);
+        ctx.restore();
+      }
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+}
+
 async function selectWinner() {
   const filledSlots = wheelSlots.filter(Boolean);
   if (filledSlots.length === 0) return;
 
-  // Determine winner based on wheel position
+  // PERBAIKAN: Determine winner based on wheel position relative to TOP pointer (12 o'clock)
+  // Normalize rotation to 0-2π range
   const normalizedRotation = (wheelRotation % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
   const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
-  const winnerSlotIndex = Math.floor(normalizedRotation / anglePerSlot);
+  
+  // Calculate which slot is currently at the TOP (where the pointer is)
+  // We add π/2 (90 degrees) to account for starting position and pointer at top
+  const pointerAngle = (3 * Math.PI / 2 - normalizedRotation + 2 * Math.PI) % (2 * Math.PI);
+  const winnerSlotIndex = Math.floor(pointerAngle / anglePerSlot) % WHEEL_SLOTS;
+  
   const winner = wheelSlots[winnerSlotIndex];
 
+  console.log('🎯 Spin Results:', {
+    normalizedRotation: (normalizedRotation * 180 / Math.PI).toFixed(1) + '°',
+    pointerAngle: (pointerAngle * 180 / Math.PI).toFixed(1) + '°',
+    winnerSlotIndex,
+    winner: winner ? formatAddress(winner) : 'Empty slot'
+  });
+
   if (winner) {
+    // PERBAIKAN: Highlight winning slot briefly
+    await highlightWinningSlot(winnerSlotIndex);
+
+    // PERBAIKAN: Animasi confetti atau celebration effect (jika ada library)
+    if (typeof confetti !== 'undefined') {
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 }
+      });
+    }
+
     // Add to winners
     recentWinners.push(winner);
 
@@ -462,10 +657,27 @@ async function selectWinner() {
 
     await saveGameState();
     updateDisplay();
-    alert(`🎉 Congratulations! Winner: ${formatAddress(winner)}`);
+    
+    // PERBAIKAN: Better winner announcement dengan modal-style alert
+    setTimeout(() => {
+      if (confirm(`🎉 CONGRATULATIONS! 🎉\n\nWinner: ${formatAddress(winner)}\nFull Address: ${winner}\n\nClick OK to continue or Cancel to copy address`)) {
+        // User clicked OK
+      } else {
+        // Copy to clipboard if user clicked Cancel
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(winner).then(() => {
+            showMessage('Winner address copied to clipboard! 📋', 'success');
+          });
+        }
+      }
+    }, 1500); // Delay untuk memberi waktu highlight effect
+  } else {
+    console.log('⚠️ No winner - empty slot selected');
+    showMessage('Spin landed on empty slot, spinning again in next cycle', 'info');
   }
 }
 
+// ==================== DISPLAY FUNCTIONS ====================
 function updateDisplay() {
   initializeWheel();
   updateStats();
@@ -478,40 +690,51 @@ function updateStats() {
   const totalWinnerCountEl = document.getElementById('totalWinnerCount');
 
   if (participantCountEl) {
-    const participants = wheelSlots.filter(Boolean).length + waitingQueue.length;
-    participantCountEl.textContent = participants;
+    const participants = wheelSlots.filter(Boolean).length + waitingQueue.filter(addr => !recentWinners.includes(addr)).length;
+    
+    // PERBAIKAN: Animate number changes
+    animateNumber(participantCountEl, parseInt(participantCountEl.textContent) || 0, participants);
   }
 
   if (queueCountEl) {
-    queueCountEl.textContent = waitingQueue.length;
+    const queueCount = waitingQueue.filter(addr => !recentWinners.includes(addr)).length;
+    animateNumber(queueCountEl, parseInt(queueCountEl.textContent) || 0, queueCount);
   }
 
   if (totalWinnerCountEl) {
-    totalWinnerCountEl.textContent = recentWinners.length;
+    animateNumber(totalWinnerCountEl, parseInt(totalWinnerCountEl.textContent) || 0, recentWinners.length);
   }
 }
 
+// PERBAIKAN: updateLists function yang menampilkan SEMUA data dengan scroll
 function updateLists() {
   // Update waiting queue list
   const queueContainer = document.getElementById('waitingQueueList');
   if (queueContainer) {
     const queueHTML = [];
     
-    // Show actual queue first (excluding winners)
+    // Show ALL queue items (excluding winners)
     const displayQueue = waitingQueue.filter(addr => !recentWinners.includes(addr));
-    displayQueue.forEach((address, index) => {
-      queueHTML.push(`<div class="list-item">
-        <span class="list-number">${index + 1}.</span>
-        <span class="list-address">${formatAddress(address)}</span>
-      </div>`);
-    });
     
-    // Fill remaining slots with placeholders
-    for (let i = displayQueue.length; i < 11; i++) {
-      queueHTML.push(`<div class="list-item">
-        <span class="list-number">${i + 1}.</span>
-        <span class="list-address">-</span>
-      </div>`);
+    if (displayQueue.length > 0) {
+      // Tampilkan semua data yang ada
+      displayQueue.forEach((address, index) => {
+        queueHTML.push(`<div class="list-item">
+          <span class="list-number">${index + 1}.</span>
+          <span class="list-address">${formatAddress(address)}</span>
+        </div>`);
+      });
+    }
+    
+    // Jika tidak ada data atau kurang dari 11, tampilkan placeholder minimal 11 item
+    const minItems = 11;
+    if (displayQueue.length < minItems) {
+      for (let i = displayQueue.length; i < minItems; i++) {
+        queueHTML.push(`<div class="list-item">
+          <span class="list-number">${i + 1}.</span>
+          <span class="list-address">-</span>
+        </div>`);
+      }
     }
     
     queueContainer.innerHTML = queueHTML.join('');
@@ -522,39 +745,59 @@ function updateLists() {
   if (winnersContainer) {
     const winnersHTML = [];
     
-    // Show recent winners (latest first)
-    const displayWinners = recentWinners.slice(-11).reverse();
-    displayWinners.forEach((address, index) => {
-      winnersHTML.push(`<div class="list-item">
-        <span class="list-number">${index + 1}.</span>
-        <span class="list-address">${formatAddress(address)}</span>
-      </div>`);
-    });
+    // Show ALL recent winners (latest first), tidak dibatasi 11
+    const displayWinners = recentWinners.slice().reverse(); // Ambil semua, terbaru dulu
     
-    // Fill remaining slots with placeholders
-    for (let i = displayWinners.length; i < 11; i++) {
-      winnersHTML.push(`<div class="list-item">
-        <span class="list-number">${i + 1}.</span>
-        <span class="list-address">-</span>
-      </div>`);
+    if (displayWinners.length > 0) {
+      displayWinners.forEach((address, index) => {
+        winnersHTML.push(`<div class="list-item">
+          <span class="list-number">${index + 1}.</span>
+          <span class="list-address">${formatAddress(address)}</span>
+        </div>`);
+      });
+    }
+    
+    // Jika winner masih sedikit, tambahkan placeholder
+    const minWinnerItems = 11;
+    if (displayWinners.length < minWinnerItems) {
+      for (let i = displayWinners.length; i < minWinnerItems; i++) {
+        winnersHTML.push(`<div class="list-item">
+          <span class="list-number">${i + 1}.</span>
+          <span class="list-address">-</span>
+        </div>`);
+      }
     }
     
     winnersContainer.innerHTML = winnersHTML.join('');
   }
 }
 
+// ==================== SOCIAL FUNCTIONS ====================
 function openSocialMedia() {
   // Replace with your social media URL
   window.open('https://twitter.com/yourhandle', '_blank');
 }
 
-// Event listeners
+// ==================== EVENT LISTENERS ====================
 document.addEventListener('DOMContentLoaded', async function() {
   console.log('🔄 Loading application...');
   
+  // PERBAIKAN: Definisikan utility functions secara lokal jika belum ada
+  const showLoadingLocal = (element) => {
+    if (element && element.classList) {
+      element.classList.add('loading');
+    }
+  };
+  
+  const hideLoadingLocal = (element) => {
+    if (element && element.classList) {
+      element.classList.remove('loading');
+    }
+  };
+  
   // PERBAIKAN: Show loading state during initialization
   const container = document.querySelector('.container');
-  showLoading(container);
+  showLoadingLocal(container);
   
   try {
     // Tunggu sedikit untuk memastikan semua library dimuat
@@ -611,10 +854,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     showMessage('Failed to load application. Please refresh the page.', 'error');
   } finally {
     // PERBAIKAN: Hide loading state
-    hideLoading(container);
+    hideLoadingLocal(container);
   }
 });
 
-// Expose functions to global scope
+// ==================== EXPOSE FUNCTIONS TO GLOBAL SCOPE ====================
 window.validateAddress = validateAddress;
 window.openSocialMedia = openSocialMedia;
