@@ -1050,6 +1050,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         <br>
         <button onclick="window.setTimer(10)" style="margin: 2px; padding: 5px 8px; font-size: 11px;">⏰ Set 10s</button>
         <button onclick="window.resetTimer()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔄 Reset Timer</button>
+        <br>
+        <button onclick="window.forceReleaseLock()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔓 Force Release</button>
+        <button onclick="window.checkLockStatus()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔍 Check Lock</button>
         <div style="margin-top: 8px; font-size: 10px; color: #888;">
           Timer: <span id="debugTimer">--:--</span><br>
           Participants: <span id="debugParticipants">0</span><br>
