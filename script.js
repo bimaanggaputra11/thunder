@@ -393,19 +393,40 @@ async function performSpin() {
     return;
   }
 
-  // Animate wheel spinning
-  const totalRotation = Math.PI * 8 + Math.random() * Math.PI * 2; // 4 full rotations plus random
-  const duration = 3000; // 3 seconds
+  // PERBAIKAN: Calculate final rotation to make spinning more natural
+  // Multiple full rotations + random final position
+  const minSpins = 4; // Minimum 4 full rotations
+  const maxSpins = 7; // Maximum 7 full rotations  
+  const spins = minSpins + Math.random() * (maxSpins - minSpins);
+  const randomFinalAngle = Math.random() * 2 * Math.PI;
+  
+  const totalRotation = spins * 2 * Math.PI + randomFinalAngle;
+  const duration = 3000 + Math.random() * 2000; // 3-5 seconds for more suspense
 
+  console.log('🎪 Starting spin:', {
+    spins: spins.toFixed(1),
+    finalAngle: (randomFinalAngle * 180 / Math.PI).toFixed(1) + '°',
+    duration: (duration / 1000).toFixed(1) + 's'
+  });
+
+  // Show spinning message
+  showMessage('🎪 Wheel is spinning...', 'info');
+
+  // Animate wheel spinning with more realistic easing
   gsap.to({ rotation: wheelRotation }, {
     rotation: wheelRotation + totalRotation,
     duration: duration / 1000,
-    ease: "power2.out",
+    ease: "power3.out", // More natural deceleration
     onUpdate: function() {
       wheelRotation = this.targets()[0].rotation;
       initializeWheel();
     },
     onComplete: function() {
+      // Clear spinning message
+      const msg = document.getElementById('message');
+      if (msg && msg.innerHTML.includes('spinning')) {
+        msg.innerHTML = '';
+      }
       selectWinner();
     }
   });
