@@ -803,6 +803,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Tunggu sedikit untuk memastikan semua library dimuat
     await new Promise(resolve => setTimeout(resolve, 100));
     
+    // PERBAIKAN: Initialize spin lock dan real-time sync
+    await initializeSpinLock();
+    await setupRealTimeSync();
+    
     // Load game state from database
     await loadGameState();
     
