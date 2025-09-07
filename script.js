@@ -1037,17 +1037,80 @@ document.addEventListener('DOMContentLoaded', async function() {
       }
     });
 
-    // PERBAIKAN: Add manual spin button for testing (dapat dihapus di production)
-    const debugMode = window.location.hash.includes('debug');
+    // PERBAIKAN: Add manual test buttons for debugging
+    const debugMode = window.location.hash.includes('debug') || window.location.search.includes('debug');
     if (debugMode) {
       const debugPanel = document.createElement('div');
-      debugPanel.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px; z-index: 1000;';
+      debugPanel.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.9); color: white; padding: 15px; border-radius: 8px; z-index: 1000; font-family: monospace; font-size: 12px;';
       debugPanel.innerHTML = `
-        <button onclick="performSpin()" style="margin: 5px; padding: 5px 10px;">Force Spin</button>
-        <button onclick="console.log({wheelSlots, waitingQueue, recentWinners})" style="margin: 5px; padding: 5px 10px;">Log State</button>
+        <div style="margin-bottom: 10px; font-weight: bold; color: #00ff00;">🔧 DEBUG MODE</div>
+        <button onclick="window.testSpin()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🎪 Force Spin</button>
+        <button onclick="window.addTestUser()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">➕ Add Test User</button>
+        <button onclick="window.logState()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">📊 Log State</button>
+        <br>
+        <button onclick="window.setTimer(10)" style="margin: 2px; padding: 5px 8px; font-size: 11px;">⏰ Set 10s</button>
+        <button onclick="window.resetTimer()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔄 Reset Timer</button>
+        <div style="margin-top: 8px; font-size: 10px; color: #888;">
+          Timer: <span id="debugTimer">--:--</span><br>
+          Participants: <span id="debugParticipants">0</span><br>
+          Queue: <span id="debugQueue">0</span><br>
+          Winners: <span id="debugWinners">0</span>
+        </div>
       `;
       document.body.appendChild(debugPanel);
-      console.log('🔧 Debug mode enabled');
+      
+      // Update debug info every second
+      setInterval(() => {
+        const debugTimer = document.getElementById('debugTimer');
+        const debugParticipants = document.getElementById('debugParticipants');
+        const debugQueue = document.getElementById('debugQueue');
+        const debugWinners = document.getElementById('debugWinners');
+        
+        if (debugTimer) {
+          const minutes = Math.floor(countdownTimer / 60).toString().padStart(2, '0');
+          const seconds = (countdownTimer % 60).toString().padStart(2, '0');
+          debugTimer.textContent = `${minutes}:${seconds}`;
+        }
+        if (debugParticipants) debugParticipants.textContent = wheelSlots.filter(Boolean).length;
+        if (debugQueue) debugQueue.textContent = waitingQueue.length;
+        if (debugWinners) debugWinners.textContent = recentWinners.length;
+      }, 1000);
+      
+      // Expose debug functions
+      window.testSpin = () => {
+        console.log('🔧 Manual spin triggered');
+        performSpin();
+      };
+      
+      window.addTestUser = () => {
+        const testAddress = 'TEST' + Date.now().toString().slice(-8) + 'a'.repeat(35);
+        wheelSlots[wheelSlots.findIndex(slot => !slot)] = testAddress;
+        updateDisplay();
+        console.log('🔧 Added test user:', formatAddress(testAddress));
+      };
+      
+      window.logState = () => {
+        console.log('🔧 Current game state:', {
+          wheelSlots: wheelSlots.map((slot, i) => `${i}: ${slot ? formatAddress(slot) : 'empty'}`),
+          waitingQueue: waitingQueue.map(addr => formatAddress(addr)),
+          recentWinners: recentWinners.map(addr => formatAddress(addr)),
+          countdownTimer,
+          isSpinning,
+          wheelRotation: wheelRotation.toFixed(2)
+        });
+      };
+      
+      window.setTimer = (seconds) => {
+        countdownTimer = seconds;
+        console.log('🔧 Timer set to', seconds, 'seconds');
+      };
+      
+      window.resetTimer = () => {
+        countdownTimer = SPIN_INTERVAL;
+        console.log('🔧 Timer reset to', SPIN_INTERVAL, 'seconds');
+      };
+      
+      console.log('🔧 Debug mode enabled - check the debug panel');
     }
 
     console.log('✅ Application loaded successfully');
