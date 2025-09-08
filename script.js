@@ -13,16 +13,21 @@ const SPIN_INTERVAL = 5 * 60; // 5 minutes in seconds
 // PERBAIKAN: Inisialisasi variabel game state dengan nilai default
 let wheelSlots = Array(WHEEL_SLOTS).fill(null);
 let waitingQueue = [];
-let recentWinners = []; // Inisialisasi dengan array kosong
+let recentWinners = []; 
 let currentUser = null;
 let countdownTimer = SPIN_INTERVAL;
 let spinInterval = null;
 let wheelRotation = 0;
 let lastSpinTimestamp = null;
-let isSpinning = false; // PERBAIKAN: Tambahkan lock untuk mencegah spin bersamaan
-let realTimeSubscription = null; // PERBAIKAN: Untuk real-time updates
-let gameInitialized = false; // PERBAIKAN: Flag untuk memastikan game sudah terinisialisasi
-let countdownInterval = null; // PERBAIKAN: Pisahkan interval countdown
+let isSpinning = false; 
+let realTimeSubscription = null; 
+let gameInitialized = false; 
+let countdownInterval = null; 
+
+// PERBAIKAN UTAMA: Tambahan variabel untuk synchronized spinning
+let currentSpinId = null; // ID untuk spin saat ini
+let targetWinnerSlot = null; // Slot pemenang yang ditentukan server
+let spinStartTime = null; // Waktu mulai spin yang disinkronkan
 
 // Cek apakah Supabase tersedia
 if (!supabase) {
@@ -65,15 +70,12 @@ function formatAddress(address) {
 function showMessage(text, type) {
   const msg = document.getElementById('message');
   if (msg) {
-    // PERBAIKAN: Hapus message lama dengan smooth transition
     msg.innerHTML = '';
     
-    // Tunggu sebentar lalu tampilkan message baru (untuk trigger animation)
     setTimeout(() => {
       msg.innerHTML = `<div class="message ${type}-message">${text}</div>`;
     }, 50);
     
-    // PERBAIKAN: Auto-hide success/info messages setelah 5 detik
     if (type === 'success' || type === 'info') {
       setTimeout(() => {
         const currentMessage = msg.querySelector('.message');
@@ -89,18 +91,16 @@ function showMessage(text, type) {
   }
 }
 
-// PERBAIKAN: Animasi untuk perubahan angka
 function animateNumber(element, from, to) {
   if (from === to) return;
   
-  const duration = 500; // 0.5 second
+  const duration = 500;
   const startTime = performance.now();
   
   function update(currentTime) {
     const elapsed = currentTime - startTime;
     const progress = Math.min(elapsed / duration, 1);
     
-    // Easing function
     const easeOutQuart = 1 - Math.pow(1 - progress, 4);
     const current = Math.round(from + (to - from) * easeOutQuart);
     
@@ -115,7 +115,6 @@ function animateNumber(element, from, to) {
 }
 
 // ==================== SPIN LOCK FUNCTIONS ====================
-// PERBAIKAN: Tambahkan fungsi untuk mencegah spin bersamaan
 async function initializeSpinLock() {
   if (!supabase) {
     console.warn('⚠️ Supabase tidak tersedia, menggunakan local spin lock');
@@ -137,21 +136,56 @@ async function initializeSpinLock() {
       });
     }
 
+    // PERBAIKAN UTAMA: Initialize spin state table untuk menyimpan hasil spin
+    await initializeSpinStateTable();
+
     console.log('✅ Spin lock initialized');
   } catch (error) {
     console.error('❌ Failed to initialize spin lock:', error);
   }
 }
 
+// PERBAIKAN UTAMA: Inisialisasi tabel untuk menyimpan state spin
+async function initializeSpinStateTable() {
+  if (!supabase) return;
+
+  try {
+    // Cek apakah tabel spin_state sudah ada data
+    const { data: existing } = await supabase
+      .from('spin_state')
+      .select('*')
+      .maybeSingle();
+
+    if (!existing) {
+      // Buat entry default
+      await supabase.from('spin_state').insert({
+        id: 1,
+        spin_id: null,
+        winner_slot: null,
+        winner_address: null,
+        target_rotation: 0,
+        spin_duration: 4000,
+        spin_start_time: null,
+        is_active: false,
+        participants_snapshot: '[]'
+      });
+    }
+
+    console.log('✅ Spin state table initialized');
+  } catch (error) {
+    console.error('❌ Failed to initialize spin state table:', error);
+  }
+}
+
 async function acquireSpinLock() {
-  if (!supabase) return true; // Fallback ke local lock
+  if (!supabase) return true; 
 
   try {
     const { data, error } = await supabase
       .from('settings')
       .update({ value: 'true' })
       .eq('key', 'spin_lock')
-      .eq('value', 'false') // Only update if currently false
+      .eq('value', 'false') 
       .select();
 
     return !error && data && data.length > 0;
@@ -174,8 +208,135 @@ async function releaseSpinLock() {
   }
 }
 
+// ==================== SYNCHRONIZED SPIN FUNCTIONS ====================
+// PERBAIKAN UTAMA: Fungsi untuk menentukan pemenang di server
+async function determineWinnerOnServer() {
+  if (!supabase) return null;
+
+  try {
+    // Ambil participants aktif saat ini
+    const filledSlots = wheelSlots.filter((slot, index) => slot !== null ? { address: slot, slotIndex: index } : null)
+                                  .filter(Boolean);
+
+    if (filledSlots.length === 0) {
+      console.log('⚠️ No participants to determine winner from');
+      return null;
+    }
+
+    // Generate deterministic random berdasarkan timestamp
+    const spinId = `spin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const winnerIndex = Math.floor(Math.random() * filledSlots.length);
+    const winnerSlot = filledSlots[winnerIndex].slotIndex;
+    const winnerAddress = filledSlots[winnerIndex].address;
+
+    // Hitung target rotation berdasarkan slot pemenang
+    const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
+    const targetAngle = winnerSlot * anglePerSlot;
+    
+    // Multiple rotations + target angle untuk animasi yang menarik
+    const minSpins = 4;
+    const maxSpins = 6;
+    const totalSpins = minSpins + Math.random() * (maxSpins - minSpins);
+    const targetRotation = totalSpins * 2 * Math.PI + (2 * Math.PI - targetAngle); // Hitung mundur karena pointer di atas
+
+    const spinDuration = 3000 + Math.random() * 2000; // 3-5 detik
+    const spinStartTime = Date.now();
+
+    // Simpan ke database
+    const { error } = await supabase
+      .from('spin_state')
+      .update({
+        spin_id: spinId,
+        winner_slot: winnerSlot,
+        winner_address: winnerAddress,
+        target_rotation: targetRotation,
+        spin_duration: spinDuration,
+        spin_start_time: spinStartTime,
+        is_active: true,
+        participants_snapshot: JSON.stringify(filledSlots)
+      })
+      .eq('id', 1);
+
+    if (error) throw error;
+
+    console.log('🎯 Winner determined on server:', {
+      spinId,
+      winnerSlot,
+      winnerAddress: formatAddress(winnerAddress),
+      targetRotation: (targetRotation * 180 / Math.PI).toFixed(1) + '°',
+      spinDuration: (spinDuration / 1000).toFixed(1) + 's'
+    });
+
+    return {
+      spinId,
+      winnerSlot,
+      winnerAddress,
+      targetRotation,
+      spinDuration,
+      spinStartTime
+    };
+  } catch (error) {
+    console.error('❌ Failed to determine winner on server:', error);
+    return null;
+  }
+}
+
+// PERBAIKAN UTAMA: Fungsi untuk mengambil hasil spin dari server
+async function getSpinResultFromServer() {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('spin_state')
+      .select('*')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (data && data.is_active) {
+      return {
+        spinId: data.spin_id,
+        winnerSlot: data.winner_slot,
+        winnerAddress: data.winner_address,
+        targetRotation: data.target_rotation,
+        spinDuration: data.spin_duration,
+        spinStartTime: data.spin_start_time,
+        participantsSnapshot: JSON.parse(data.participants_snapshot || '[]')
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.error('❌ Failed to get spin result from server:', error);
+    return null;
+  }
+}
+
+// PERBAIKAN UTAMA: Fungsi untuk menandai spin selesai
+async function markSpinCompleted() {
+  if (!supabase) return;
+
+  try {
+    await supabase
+      .from('spin_state')
+      .update({
+        is_active: false,
+        spin_id: null,
+        winner_slot: null,
+        winner_address: null,
+        target_rotation: 0,
+        spin_start_time: null
+      })
+      .eq('id', 1);
+
+    console.log('✅ Spin marked as completed');
+  } catch (error) {
+    console.error('❌ Failed to mark spin completed:', error);
+  }
+}
+
 // ==================== REAL-TIME SYNC FUNCTIONS ====================
-// PERBAIKAN: Tambahkan real-time sync
 async function setupRealTimeSync() {
   if (!supabase) {
     console.warn('⚠️ Supabase tidak tersedia, real-time sync dinonaktifkan');
@@ -183,7 +344,7 @@ async function setupRealTimeSync() {
   }
 
   try {
-    // Subscribe to changes in wheel_slots, queue_list, and winners_list
+    // Subscribe to changes in wheel_slots, queue_list, winners_list, dan spin_state
     realTimeSubscription = supabase
       .channel('game_updates')
       .on('postgres_changes', 
@@ -202,6 +363,11 @@ async function setupRealTimeSync() {
         { event: '*', schema: 'public', table: 'settings' },
         handleRealTimeUpdate
       )
+      // PERBAIKAN UTAMA: Listen untuk perubahan spin_state
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'spin_state' },
+        handleSpinStateUpdate
+      )
       .subscribe();
 
     console.log('✅ Real-time sync enabled');
@@ -213,12 +379,25 @@ async function setupRealTimeSync() {
 async function handleRealTimeUpdate(payload) {
   console.log('📡 Real-time update received:', payload);
   
-  // Debounce updates to prevent too frequent refreshes
   clearTimeout(handleRealTimeUpdate.timeout);
   handleRealTimeUpdate.timeout = setTimeout(async () => {
     await loadGameState();
     updateDisplay();
   }, 1000);
+}
+
+// PERBAIKAN UTAMA: Handle update untuk spin state
+async function handleSpinStateUpdate(payload) {
+  console.log('🎪 Spin state update received:', payload);
+  
+  if (payload.eventType === 'UPDATE' && payload.new.is_active && !isSpinning) {
+    // Ada spin baru yang dimulai dari client lain
+    const spinResult = await getSpinResultFromServer();
+    if (spinResult) {
+      console.log('🔄 Syncing to ongoing spin from another client');
+      await synchronizedSpin(spinResult);
+    }
+  }
 }
 
 // ==================== DATABASE FUNCTIONS ====================
@@ -260,7 +439,6 @@ async function saveGameState() {
       }
     }
 
-    // PERBAIKAN: Simpan waktu yang akurat dalam database
     if (lastSpinTimestamp) {
       await supabase.from('settings').upsert([{ 
         key: 'last_spin_timestamp', 
@@ -268,7 +446,6 @@ async function saveGameState() {
       }], { onConflict: 'key' });
     }
 
-    // PERBAIKAN: Simpan next spin time untuk sinkronisasi yang lebih akurat
     const nextSpinTime = lastSpinTimestamp + (SPIN_INTERVAL * 1000);
     await supabase.from('settings').upsert([{ 
       key: 'next_spin_time', 
@@ -288,14 +465,14 @@ async function loadGameState() {
   }
 
   try {
-    // Load winners first (to exclude them from wheel and queue)
+    // Load winners first
     const { data: winnersData } = await supabase
       .from('winners_list')
       .select('*')
       .order('timestamp', { ascending: true });
 
     const allWinners = winnersData ? winnersData.map(w => w.address) : [];
-    recentWinners = [...new Set(allWinners)]; // Remove duplicates
+    recentWinners = [...new Set(allWinners)]; 
 
     // Load wheel slots (exclude winners)
     const { data: slotsData } = await supabase
@@ -321,7 +498,7 @@ async function loadGameState() {
     const allQueue = queueData ? queueData.map(q => q.address) : [];
     waitingQueue = [...new Set(allQueue.filter(addr => !recentWinners.includes(addr)))];
 
-    // PERBAIKAN: Load dan sinkronisasi waktu dengan lebih akurat
+    // Load timestamp
     const { data: timestampData } = await supabase
       .from('settings')
       .select('*')
@@ -338,28 +515,31 @@ async function loadGameState() {
       lastSpinTimestamp = parseInt(timestampData.value);
       const nextSpinTime = parseInt(nextSpinData.value);
       
-      // PERBAIKAN: Hitung countdown berdasarkan next spin time
       const now = Date.now();
       const remaining = nextSpinTime - now;
       
       if (remaining > 0) {
         countdownTimer = Math.floor(remaining / 1000);
       } else {
-        // Jika waktu sudah lewat, set untuk spin segera
         countdownTimer = 0;
         console.log('⏰ Spin time has passed, will spin immediately');
       }
     } else {
-      // If no timestamp exists, set current time as last spin
       const now = Date.now();
       lastSpinTimestamp = now;
       countdownTimer = SPIN_INTERVAL;
       
-      // Save initial timestamp
       await supabase.from('settings').upsert([
         { key: 'last_spin_timestamp', value: String(now) },
         { key: 'next_spin_time', value: String(now + (SPIN_INTERVAL * 1000)) }
       ], { onConflict: 'key' });
+    }
+
+    // PERBAIKAN UTAMA: Cek apakah ada spin yang sedang berlangsung
+    const ongoingSpin = await getSpinResultFromServer();
+    if (ongoingSpin && !isSpinning) {
+      console.log('🔄 Found ongoing spin, syncing...');
+      await synchronizedSpin(ongoingSpin);
     }
 
     console.log('✅ Game state loaded from database', {
@@ -367,14 +547,14 @@ async function loadGameState() {
       countdownTimer: `${Math.floor(countdownTimer / 60)}:${(countdownTimer % 60).toString().padStart(2, '0')}`,
       wheelParticipants: wheelSlots.filter(Boolean).length,
       queueLength: waitingQueue.length,
-      winnersCount: recentWinners.length
+      winnersCount: recentWinners.length,
+      ongoingSpin: !!ongoingSpin
     });
   } catch (error) {
     console.error('❌ Failed to load game state:', error);
   }
 }
 
-// PERBAIKAN: Fungsi untuk update spin timestamp yang lebih akurat
 async function updateSpinTimestamp() {
   if (!supabase) {
     console.error('❌ Supabase client tidak tersedia');
@@ -422,13 +602,12 @@ function initializeWheel() {
     const startAngle = i * anglePerSlot + wheelRotation;
     const endAngle = (i + 1) * anglePerSlot + wheelRotation;
     
-    // Segment background - add alternating colors for better visibility
+    // Segment background
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, startAngle, endAngle);
     ctx.lineTo(centerX, centerY);
     
     if (wheelSlots[i]) {
-      // Alternating colors for filled slots
       ctx.fillStyle = i % 2 === 0 ? '#f8f8f8' : '#e8e8e8';
     } else {
       ctx.fillStyle = '#ffffff';
@@ -453,7 +632,6 @@ function initializeWheel() {
       ctx.fillText(formatAddress(wheelSlots[i]), 0, 0);
       ctx.restore();
     } else {
-      // Draw "Address holder" text for empty slots
       const textAngle = startAngle + anglePerSlot / 2;
       const textX = centerX + Math.cos(textAngle) * (radius * 0.7);
       const textY = centerY + Math.sin(textAngle) * (radius * 0.7);
@@ -475,19 +653,19 @@ function initializeWheel() {
   ctx.fillStyle = '#333';
   ctx.fill();
 
-  // PERBAIKAN: Draw pointer at top (12 o'clock position)
+  // Draw pointer at top 
   ctx.beginPath();
-  ctx.moveTo(centerX, centerY - radius - 20); // Top point
-  ctx.lineTo(centerX - 15, centerY - radius - 5); // Left point
-  ctx.lineTo(centerX + 15, centerY - radius - 5); // Right point
+  ctx.moveTo(centerX, centerY - radius - 20); 
+  ctx.lineTo(centerX - 15, centerY - radius - 5); 
+  ctx.lineTo(centerX + 15, centerY - radius - 5); 
   ctx.closePath();
-  ctx.fillStyle = '#ff4444'; // Red color for better visibility
+  ctx.fillStyle = '#ff4444'; 
   ctx.fill();
   ctx.strokeStyle = '#333';
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // PERBAIKAN: Add pointer shadow for depth
+  // Add pointer shadow
   ctx.beginPath();
   ctx.moveTo(centerX + 2, centerY - radius - 18);
   ctx.lineTo(centerX - 13, centerY - radius - 3);
@@ -532,7 +710,6 @@ async function validateAddress() {
 
   const address = input.value.trim();
 
-  // Clear previous messages
   msg.innerHTML = '';
 
   if (!address) {
@@ -547,25 +724,21 @@ async function validateAddress() {
     return;
   }
 
-  // PERBAIKAN: Pastikan recentWinners sudah diinisialisasi
   if (!Array.isArray(recentWinners)) {
     console.warn('⚠️ recentWinners belum diinisialisasi, menggunakan array kosong');
     recentWinners = [];
   }
 
-  // Check if address is already a winner
   if (recentWinners.includes(address)) {
     showMessage('This address has already won and cannot participate again', 'error');
     return;
   }
 
-  // Check if address is already in the system
   if (wheelSlots.includes(address) || waitingQueue.includes(address)) {
     showMessage('This address is already participating in the game', 'info');
     return;
   }
 
-  // Show loading states
   showLoading(validationCard);
   disableButton(verifyBtn, 'Validating...');
   showMessage('Validating token holder status...', 'info');
@@ -579,7 +752,6 @@ async function validateAddress() {
       await addUserToSystem(currentUser);
       updateDisplay();
       
-      // Clear input after successful validation
       input.value = '';
     } else {
       showMessage('You are not a token holder ❌', 'error');
@@ -589,19 +761,16 @@ async function validateAddress() {
     console.error('Validation error:', error);
     showMessage('Validation failed. Please try again.', 'error');
   } finally {
-    // Hide loading states
     hideLoading(validationCard);
     enableButton(verifyBtn);
   }
 }
 
 async function addUserToSystem(address) {
-  // Pastikan arrays sudah diinisialisasi
   if (!Array.isArray(recentWinners)) recentWinners = [];
   if (!Array.isArray(wheelSlots)) wheelSlots = Array(WHEEL_SLOTS).fill(null);
   if (!Array.isArray(waitingQueue)) waitingQueue = [];
 
-  // Check if address is already in the system or is a winner
   if (recentWinners.includes(address) || 
       wheelSlots.includes(address) || 
       waitingQueue.includes(address)) {
@@ -619,9 +788,7 @@ async function addUserToSystem(address) {
 }
 
 // ==================== COUNTDOWN FUNCTIONS ====================
-// PERBAIKAN: Pisahkan countdown logic
 function startCountdown() {
-  // Clear existing countdown
   if (countdownInterval) {
     clearInterval(countdownInterval);
   }
@@ -634,7 +801,6 @@ function startCountdown() {
 
     console.log('⏰ Countdown:', countdownTimer, 'seconds remaining');
 
-    // PERBAIKAN: Cek apakah sudah waktunya spin dan ada peserta
     if (countdownTimer <= 0) {
       clearInterval(countdownInterval);
       countdownInterval = null;
@@ -661,11 +827,11 @@ function updateCountdownDisplay() {
   }
 }
 
-// ==================== SPIN FUNCTIONS ====================
+// ==================== SYNCHRONIZED SPIN FUNCTIONS ====================
+// PERBAIKAN UTAMA: Spin function yang menentukan pemenang di server terlebih dahulu
 async function performSpin() {
   console.log('🎪 performSpin called - isSpinning:', isSpinning);
   
-  // PERBAIKAN: Prevent multiple simultaneous spins
   if (isSpinning) {
     console.log('⚠️ Spin already in progress, skipping');
     return;
@@ -679,7 +845,7 @@ async function performSpin() {
     return;
   }
 
-  // PERBAIKAN: Try to acquire spin lock
+  // PERBAIKAN UTAMA: Try to acquire spin lock
   const lockAcquired = await acquireSpinLock();
   if (!lockAcquired && supabase) {
     console.log('⚠️ Could not acquire spin lock, another instance is spinning');
@@ -690,65 +856,26 @@ async function performSpin() {
   console.log('🎪 Starting spin with', filledSlots.length, 'participants');
 
   try {
-    // Update spin timestamp first
-    await updateSpinTimestamp();
-
-    // Check if GSAP is available
-    if (typeof gsap === 'undefined') {
-      console.error('❌ GSAP library tidak tersedia');
-      // Fallback tanpa animasi
-      selectWinner();
-      return;
+    // PERBAIKAN UTAMA: Tentukan pemenang di server TERLEBIH DAHULU
+    const spinResult = await determineWinnerOnServer();
+    if (!spinResult) {
+      console.error('❌ Failed to determine winner on server');
+      throw new Error('Failed to determine winner on server');
     }
 
-    // PERBAIKAN: Calculate final rotation to make spinning more natural
-    // Multiple full rotations + random final position
-    const minSpins = 4; // Minimum 4 full rotations
-    const maxSpins = 7; // Maximum 7 full rotations  
-    const spins = minSpins + Math.random() * (maxSpins - minSpins);
-    const randomFinalAngle = Math.random() * 2 * Math.PI;
-    
-    const totalRotation = spins * 2 * Math.PI + randomFinalAngle;
-    const duration = 3000 + Math.random() * 2000; // 3-5 seconds for more suspense
+    // Update spin timestamp
+    await updateSpinTimestamp();
 
-    console.log('🎪 Spin parameters:', {
-      spins: spins.toFixed(1),
-      finalAngle: (randomFinalAngle * 180 / Math.PI).toFixed(1) + '°',
-      duration: (duration / 1000).toFixed(1) + 's',
-      totalRotation: totalRotation.toFixed(2)
-    });
+    // PERBAIKAN UTAMA: Mulai synchronized spin
+    await synchronizedSpin(spinResult);
 
-    // Show spinning message
-    showMessage('🎪 Wheel is spinning...', 'info');
-
-    // Animate wheel spinning with more realistic easing
-    gsap.to({ rotation: wheelRotation }, {
-      rotation: wheelRotation + totalRotation,
-      duration: duration / 1000,
-      ease: "power3.out", // More natural deceleration
-      onUpdate: function() {
-        wheelRotation = this.targets()[0].rotation;
-        initializeWheel();
-      },
-      onComplete: function() {
-        console.log('🎪 Spin animation completed');
-        // Clear spinning message
-        const msg = document.getElementById('message');
-        if (msg && msg.innerHTML.includes('spinning')) {
-          msg.innerHTML = '';
-        }
-        selectWinner();
-      }
-    });
   } catch (error) {
     console.error('❌ Error during spin:', error);
     showMessage('Spin failed. Please try again.', 'error');
     
-    // Reset timer if spin failed
     countdownTimer = SPIN_INTERVAL;
     startCountdown();
   } finally {
-    // PERBAIKAN: Always release lock and reset spinning flag after delay
     setTimeout(async () => {
       isSpinning = false;
       await releaseSpinLock();
@@ -757,7 +884,122 @@ async function performSpin() {
   }
 }
 
-// PERBAIKAN: Function untuk highlight winning slot
+// PERBAIKAN UTAMA: Fungsi untuk melakukan spin tersinkronisasi berdasarkan hasil server
+async function synchronizedSpin(spinResult) {
+  if (typeof gsap === 'undefined') {
+    console.error('❌ GSAP library tidak tersedia');
+    selectWinnerFromServer(spinResult);
+    return;
+  }
+
+  const { targetRotation, spinDuration, spinStartTime } = spinResult;
+  
+  // Hitung delay jika client join di tengah spin
+  const now = Date.now();
+  const elapsedTime = now - spinStartTime;
+  const remainingDuration = Math.max(100, spinDuration - elapsedTime);
+
+  console.log('🎪 Synchronized spin parameters:', {
+    targetRotation: (targetRotation * 180 / Math.PI).toFixed(1) + '°',
+    originalDuration: spinDuration + 'ms',
+    elapsedTime: elapsedTime + 'ms',
+    remainingDuration: remainingDuration + 'ms',
+    winnerSlot: spinResult.winnerSlot,
+    winnerAddress: formatAddress(spinResult.winnerAddress)
+  });
+
+  // Show spinning message
+  showMessage('🎪 Wheel is spinning...', 'info');
+
+  // PERBAIKAN UTAMA: Animasi menuju target rotation yang SAMA untuk semua client
+  gsap.to({ rotation: wheelRotation }, {
+    rotation: wheelRotation + targetRotation,
+    duration: remainingDuration / 1000,
+    ease: "power3.out",
+    onUpdate: function() {
+      wheelRotation = this.targets()[0].rotation;
+      initializeWheel();
+    },
+    onComplete: function() {
+      console.log('🎪 Synchronized spin animation completed');
+      const msg = document.getElementById('message');
+      if (msg && msg.innerHTML.includes('spinning')) {
+        msg.innerHTML = '';
+      }
+      selectWinnerFromServer(spinResult);
+    }
+  });
+}
+
+// PERBAIKAN UTAMA: Fungsi untuk memproses pemenang berdasarkan hasil server
+async function selectWinnerFromServer(spinResult) {
+  const { winnerSlot, winnerAddress } = spinResult;
+
+  console.log('🎯 Processing server-determined winner:', {
+    winnerSlot,
+    winnerAddress: formatAddress(winnerAddress)
+  });
+
+  // Highlight winning slot
+  await highlightWinningSlot(winnerSlot);
+
+  // Add confetti effect
+  if (typeof confetti !== 'undefined') {
+    confetti({
+      particleCount: 100,
+      spread: 70,
+      origin: { y: 0.6 }
+    });
+  }
+
+  // Update game state
+  if (winnerAddress) {
+    // Add to winners
+    if (!recentWinners.includes(winnerAddress)) {
+      recentWinners.push(winnerAddress);
+    }
+
+    // Remove from wheel
+    wheelSlots[winnerSlot] = null;
+
+    // Fill empty slot from queue (excluding winners)
+    const availableQueueUsers = waitingQueue.filter(addr => !recentWinners.includes(addr));
+    if (availableQueueUsers.length > 0) {
+      const nextUser = availableQueueUsers[0];
+      wheelSlots[winnerSlot] = nextUser;
+      waitingQueue = waitingQueue.filter(addr => addr !== nextUser);
+    }
+
+    // Remove winner from queue if they were there
+    waitingQueue = waitingQueue.filter(addr => addr !== winnerAddress);
+
+    await saveGameState();
+    updateDisplay();
+    
+    // Winner announcement
+    setTimeout(() => {
+      if (confirm(`🎉 CONGRATULATIONS! 🎉\n\nWinner: ${formatAddress(winnerAddress)}\nFull Address: ${winnerAddress}\n\nClick OK to continue or Cancel to copy address`)) {
+        // User clicked OK
+      } else {
+        // Copy to clipboard
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(winnerAddress).then(() => {
+            showMessage('Winner address copied to clipboard! 📋', 'success');
+          });
+        }
+      }
+    }, 1500);
+  }
+
+  // Mark spin as completed in server
+  await markSpinCompleted();
+
+  // Reset countdown
+  countdownTimer = SPIN_INTERVAL;
+  startCountdown();
+}
+
+// Function untuk highlight winning slot
 async function highlightWinningSlot(slotIndex) {
   const canvas = document.getElementById('wheelCanvas');
   if (!canvas) return;
@@ -770,24 +1012,21 @@ async function highlightWinningSlot(slotIndex) {
 
   // Highlight animation
   for (let i = 0; i < 6; i++) {
-    // Redraw wheel
     initializeWheel();
     
-    // Draw highlight on winning slot
-    if (i % 2 === 0) { // Flash effect
+    if (i % 2 === 0) {
       const startAngle = slotIndex * anglePerSlot + wheelRotation;
       const endAngle = (slotIndex + 1) * anglePerSlot + wheelRotation;
       
       ctx.beginPath();
       ctx.arc(centerX, centerY, radius, startAngle, endAngle);
       ctx.lineTo(centerX, centerY);
-      ctx.fillStyle = 'rgba(255, 215, 0, 0.7)'; // Gold highlight
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
       ctx.fill();
       ctx.strokeStyle = '#FFD700';
       ctx.lineWidth = 4;
       ctx.stroke();
       
-      // Redraw text on highlighted slot
       if (wheelSlots[slotIndex]) {
         const textAngle = startAngle + anglePerSlot / 2;
         const textX = centerX + Math.cos(textAngle) * (radius * 0.7);
@@ -808,91 +1047,6 @@ async function highlightWinningSlot(slotIndex) {
   }
 }
 
-async function selectWinner() {
-  const filledSlots = wheelSlots.filter(Boolean);
-  if (filledSlots.length === 0) {
-    console.log('⚠️ No participants to select winner from');
-    countdownTimer = SPIN_INTERVAL;
-    startCountdown();
-    return;
-  }
-
-  // PERBAIKAN: Determine winner based on wheel position relative to TOP pointer (12 o'clock)
-  // Normalize rotation to 0-2π range
-  const normalizedRotation = (wheelRotation % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-  const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
-  
-  // Calculate which slot is currently at the TOP (where the pointer is)
-  // We add π/2 (90 degrees) to account for starting position and pointer at top
-  const pointerAngle = (3 * Math.PI / 2 - normalizedRotation + 2 * Math.PI) % (2 * Math.PI);
-  const winnerSlotIndex = Math.floor(pointerAngle / anglePerSlot) % WHEEL_SLOTS;
-  
-  const winner = wheelSlots[winnerSlotIndex];
-
-  console.log('🎯 Spin Results:', {
-    normalizedRotation: (normalizedRotation * 180 / Math.PI).toFixed(1) + '°',
-    pointerAngle: (pointerAngle * 180 / Math.PI).toFixed(1) + '°',
-    winnerSlotIndex,
-    winner: winner ? formatAddress(winner) : 'Empty slot',
-    filledSlots: filledSlots.length
-  });
-
-  if (winner) {
-    // PERBAIKAN: Highlight winning slot briefly
-    await highlightWinningSlot(winnerSlotIndex);
-
-    // PERBAIKAN: Animasi confetti atau celebration effect (jika ada library)
-    if (typeof confetti !== 'undefined') {
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-    }
-
-    // Add to winners
-    recentWinners.push(winner);
-
-    // Remove from wheel
-    wheelSlots[winnerSlotIndex] = null;
-
-    // Fill empty slot from queue (excluding winners)
-    const availableQueueUsers = waitingQueue.filter(addr => !recentWinners.includes(addr));
-    if (availableQueueUsers.length > 0) {
-      const nextUser = availableQueueUsers[0];
-      wheelSlots[winnerSlotIndex] = nextUser;
-      waitingQueue = waitingQueue.filter(addr => addr !== nextUser);
-    }
-
-    // Remove winner from queue if they were there
-    waitingQueue = waitingQueue.filter(addr => addr !== winner);
-
-    await saveGameState();
-    updateDisplay();
-    
-    // PERBAIKAN: Better winner announcement dengan modal-style alert
-    setTimeout(() => {
-      if (confirm(`🎉 CONGRATULATIONS! 🎉\n\nWinner: ${formatAddress(winner)}\nFull Address: ${winner}\n\nClick OK to continue or Cancel to copy address`)) {
-        // User clicked OK
-      } else {
-        // Copy to clipboard if user clicked Cancel
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText(winner).then(() => {
-            showMessage('Winner address copied to clipboard! 📋', 'success');
-          });
-        }
-      }
-    }, 1500); // Delay untuk memberi waktu highlight effect
-  } else {
-    console.log('⚠️ No winner - empty slot selected');
-    showMessage('Spin landed on empty slot, spinning again in next cycle', 'info');
-  }
-
-  // PERBAIKAN: Always reset countdown after spin
-  countdownTimer = SPIN_INTERVAL;
-  startCountdown();
-}
-
 // ==================== DISPLAY FUNCTIONS ====================
 function updateDisplay() {
   initializeWheel();
@@ -907,8 +1061,6 @@ function updateStats() {
 
   if (participantCountEl) {
     const participants = wheelSlots.filter(Boolean).length + waitingQueue.filter(addr => !recentWinners.includes(addr)).length;
-    
-    // PERBAIKAN: Animate number changes
     animateNumber(participantCountEl, parseInt(participantCountEl.textContent) || 0, participants);
   }
 
@@ -922,18 +1074,15 @@ function updateStats() {
   }
 }
 
-// PERBAIKAN: updateLists function yang menampilkan SEMUA data dengan scroll
 function updateLists() {
   // Update waiting queue list
   const queueContainer = document.getElementById('waitingQueueList');
   if (queueContainer) {
     const queueHTML = [];
     
-    // Show ALL queue items (excluding winners)
     const displayQueue = waitingQueue.filter(addr => !recentWinners.includes(addr));
     
     if (displayQueue.length > 0) {
-      // Tampilkan semua data yang ada
       displayQueue.forEach((address, index) => {
         queueHTML.push(`<div class="list-item">
           <span class="list-number">${index + 1}.</span>
@@ -942,7 +1091,6 @@ function updateLists() {
       });
     }
     
-    // Jika tidak ada data atau kurang dari 11, tampilkan placeholder minimal 11 item
     const minItems = 11;
     if (displayQueue.length < minItems) {
       for (let i = displayQueue.length; i < minItems; i++) {
@@ -961,8 +1109,7 @@ function updateLists() {
   if (winnersContainer) {
     const winnersHTML = [];
     
-    // Show ALL recent winners (latest first), tidak dibatasi 11
-    const displayWinners = recentWinners.slice().reverse(); // Ambil semua, terbaru dulu
+    const displayWinners = recentWinners.slice().reverse();
     
     if (displayWinners.length > 0) {
       displayWinners.forEach((address, index) => {
@@ -973,7 +1120,6 @@ function updateLists() {
       });
     }
     
-    // Jika winner masih sedikit, tambahkan placeholder
     const minWinnerItems = 11;
     if (displayWinners.length < minWinnerItems) {
       for (let i = displayWinners.length; i < minWinnerItems; i++) {
@@ -990,12 +1136,10 @@ function updateLists() {
 
 // ==================== SOCIAL FUNCTIONS ====================
 function openSocialMedia() {
-  // Replace with your social media URL
   window.open('https://twitter.com/yourhandle', '_blank');
 }
 
 // ==================== CLEANUP FUNCTIONS ====================
-// PERBAIKAN: Tambahkan cleanup functions
 function cleanup() {
   if (countdownInterval) {
     clearInterval(countdownInterval);
@@ -1007,18 +1151,15 @@ function cleanup() {
     realTimeSubscription = null;
   }
   
-  // Clear any pending timeouts
   if (handleRealTimeUpdate.timeout) {
     clearTimeout(handleRealTimeUpdate.timeout);
   }
 }
 
-// Cleanup on page unload
 window.addEventListener('beforeunload', cleanup);
 window.addEventListener('unload', cleanup);
 
 // ==================== ERROR HANDLING ====================
-// PERBAIKAN: Global error handler
 window.addEventListener('error', function(event) {
   console.error('❌ Global error:', event.error);
   showMessage('An unexpected error occurred. Please refresh the page.', 'error');
@@ -1030,7 +1171,6 @@ window.addEventListener('unhandledrejection', function(event) {
 });
 
 // ==================== INITIALIZATION ====================
-// PERBAIKAN: Improved initialization process
 async function initializeGame() {
   if (gameInitialized) {
     console.log('⚠️ Game already initialized');
@@ -1041,22 +1181,18 @@ async function initializeGame() {
   gameInitialized = true;
 
   try {
-    // Initialize components step by step dengan error handling
     await initializeSpinLock();
     console.log('✅ Spin lock initialized');
 
     await setupRealTimeSync();
     console.log('✅ Real-time sync initialized');
 
-    // Load game state from database
     await loadGameState();
     console.log('✅ Game state loaded');
 
-    // Initialize display
     initializeWheel();
     updateDisplay();
 
-    // PERBAIKAN: Start countdown only if not already running
     if (!countdownInterval) {
       console.log('⏰ Starting countdown timer');
       startCountdown();
@@ -1070,14 +1206,12 @@ async function initializeGame() {
     console.error('❌ Failed to initialize game:', error);
     showMessage('Failed to load game. Some features may not work properly.', 'error');
     
-    // Initialize with defaults if loading fails
     wheelSlots = Array(WHEEL_SLOTS).fill(null);
     waitingQueue = [];
     recentWinners = [];
     countdownTimer = SPIN_INTERVAL;
     lastSpinTimestamp = Date.now();
     
-    // Still try to start countdown
     startCountdown();
     
     return false;
@@ -1088,18 +1222,14 @@ async function initializeGame() {
 document.addEventListener('DOMContentLoaded', async function() {
   console.log('🔄 DOM loaded, starting application...');
   
-  // PERBAIKAN: Show loading state during initialization
   const container = document.querySelector('.container');
   showLoading(container);
   
   try {
-    // Tunggu sedikit untuk memastikan semua library dimuat
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    // Initialize the game
     await initializeGame();
 
-    // Add event listeners
     const walletInput = document.getElementById('walletAddress');
     if (walletInput) {
       walletInput.addEventListener('keypress', function(e) {
@@ -1109,7 +1239,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
       });
       
-      // PERBAIKAN: Auto-clear error messages when user starts typing
       walletInput.addEventListener('input', function() {
         const msg = document.getElementById('message');
         const currentMessage = msg?.querySelector('.error-message');
@@ -1119,11 +1248,9 @@ document.addEventListener('DOMContentLoaded', async function() {
       });
     }
 
-    // PERBAIKAN: Add click-to-copy functionality for addresses in lists
     document.addEventListener('click', function(e) {
       if (e.target.classList.contains('list-address') && e.target.textContent !== '-') {
         const address = e.target.textContent;
-        // Find full address from our arrays
         const fullAddress = [...wheelSlots.filter(Boolean), ...waitingQueue, ...recentWinners]
           .find(addr => formatAddress(addr) === address);
         
@@ -1131,14 +1258,13 @@ document.addEventListener('DOMContentLoaded', async function() {
           navigator.clipboard.writeText(fullAddress).then(() => {
             showMessage('Address copied to clipboard! 📋', 'success');
           }).catch(() => {
-            // Fallback for browsers without clipboard API
             showMessage('Could not copy to clipboard. Please copy manually.', 'info');
           });
         }
       }
     });
 
-    // PERBAIKAN: Add manual test buttons for debugging (only if debug mode)
+    // Debug mode
     const debugMode = window.location.hash.includes('debug') || window.location.search.includes('debug');
     if (debugMode) {
       const debugPanel = document.createElement('div');
@@ -1154,9 +1280,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         <br>
         <button onclick="window.debugFunctions.forceReleaseLock()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔓 Force Release</button>
         <button onclick="window.debugFunctions.checkLockStatus()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔍 Check Lock</button>
-        <br>
-        <button onclick="window.debugFunctions.forceUnlock()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🚨 Force Unlock</button>
-        <button onclick="window.debugFunctions.testLock()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🧪 Test Lock</button>
         <div style="margin-top: 8px; font-size: 10px; color: #888;">
           Timer: <span id="debugTimer">--:--</span><br>
           Participants: <span id="debugParticipants">0</span><br>
@@ -1167,7 +1290,6 @@ document.addEventListener('DOMContentLoaded', async function() {
       `;
       document.body.appendChild(debugPanel);
       
-      // Update debug info every second
       setInterval(() => {
         const debugTimer = document.getElementById('debugTimer');
         const debugParticipants = document.getElementById('debugParticipants');
@@ -1186,7 +1308,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (debugSpinning) debugSpinning.textContent = isSpinning.toString();
       }, 1000);
       
-      // Expose debug functions
       window.debugFunctions = {
         testSpin: () => {
           console.log('🔧 Manual spin triggered');
@@ -1258,19 +1379,15 @@ document.addEventListener('DOMContentLoaded', async function() {
     console.error('❌ Failed to load application:', error);
     showMessage('Failed to load application. Please refresh the page.', 'error');
   } finally {
-    // PERBAIKAN: Hide loading state
     hideLoading(container);
   }
 });
 
-// PERBAIKAN: Handle page visibility changes to sync timer
 document.addEventListener('visibilitychange', function() {
   if (!document.hidden && gameInitialized) {
     console.log('🔄 Page became visible, syncing game state...');
-    // Reload game state when page becomes visible again
     loadGameState().then(() => {
       updateDisplay();
-      // Restart countdown if needed
       if (!countdownInterval) {
         startCountdown();
       }
@@ -1282,7 +1399,6 @@ document.addEventListener('visibilitychange', function() {
 window.validateAddress = validateAddress;
 window.openSocialMedia = openSocialMedia;
 
-// PERBAIKAN: Expose essential functions for debugging
 if (window.location.hash.includes('debug') || window.location.search.includes('debug')) {
   window.resetGame = async () => {
     if (confirm('Are you sure you want to reset the entire game? This will clear all data.')) {
@@ -1299,6 +1415,7 @@ if (window.location.hash.includes('debug') || window.location.search.includes('d
       }
       
       await saveGameState();
+      await markSpinCompleted(); // PERBAIKAN: Reset spin state juga
       updateDisplay();
       startCountdown();
       console.log('🔄 Game reset completed');
