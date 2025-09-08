@@ -7,7 +7,7 @@ const supabase = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Configuration
 const TOKEN_MINT = "ACbRrERR5GJnADhLhhanxrDCXJzGhyF64SKihbzBpump";
-const WHEEL_SLOTS = 8; // Number of slots in the wheel
+const WHEEL_SLOTS = 50; // Number of slots in the wheel
 const SPIN_INTERVAL = 5 * 60; // 5 minutes in seconds
 
 // PERBAIKAN: Inisialisasi variabel game state dengan nilai default
@@ -799,7 +799,7 @@ function initializeWheel() {
 
   // Draw pointer at top 
   ctx.beginPath();
-  ctx.moveTo(centerX, centerY - radius - 1); 
+  ctx.moveTo(centerX, centerY - radius - -20); 
   ctx.lineTo(centerX - 15, centerY - radius - 15); 
   ctx.lineTo(centerX + 15, centerY - radius - 15); 
   ctx.closePath();
@@ -811,9 +811,9 @@ function initializeWheel() {
 
   // Add pointer shadow
   ctx.beginPath();
-  ctx.moveTo(centerX + 2, centerY - radius - 1);
-  ctx.lineTo(centerX - 13, centerY - radius - 13);
-  ctx.lineTo(centerX + 17, centerY - radius - 13);
+  ctx.moveTo(centerX + 2, centerY - radius - -20);
+  ctx.lineTo(centerX - 17, centerY - radius - 15);
+  ctx.lineTo(centerX + 17, centerY - radius - 15);
   ctx.closePath();
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fill();
@@ -1180,7 +1180,7 @@ async function highlightWinningSlot(slotIndex) {
   const ctx = canvas.getContext('2d');
   const centerX = canvas.width / 2;
   const centerY = canvas.height / 2;
-  const radius = 140;
+  const radius = 280;
   const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
 
   // Highlight animation

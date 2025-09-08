@@ -216,8 +216,9 @@ body {
 .wheel-container {
   margin: 20px 0;
   position: relative;
-  display: flex;
+  display:flex;
   justify-content: center;
+  align-items: center;
 }
 
 #wheelCanvas {
@@ -226,6 +227,15 @@ body {
   background:#18423d;
   /* PERBAIKAN: Tambahkan shadow untuk depth */
   box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+}
+
+#imagecanvas {
+  justify-content: center;
+  align-items: center;
+  position:absolute;
+  width: 20%;
+ 
+
 }
 
 /* Countdown Timer */
@@ -316,7 +326,7 @@ body {
   overflow-y: auto;
   /* PERBAIKAN: Custom scrollbar styling */
   scrollbar-width: thin;
-  scrollbar-color: #ccc #f0f0f0;
+  scrollbar-color:  #305b4c #f0f0f0;
 }
 
 /* PERBAIKAN: Custom scrollbar untuk Webkit browsers */
@@ -348,7 +358,7 @@ body {
 }
 
 .list-item:hover {
-  background-color: #f8f8f8;
+  background-color:  #305b4c;
 }
 
 .list-item:last-child {
