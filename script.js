@@ -114,6 +114,37 @@ function animateNumber(element, from, to) {
   requestAnimationFrame(update);
 }
 
+// PERBAIKAN UTAMA: Fungsi seeded random untuk hasil yang konsisten
+function seededRandom(seed) {
+  let x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+// ==================== AUTO FILL EMPTY SLOTS ====================
+// PERBAIKAN: Fungsi untuk mengisi slot kosong dari queue
+function fillEmptySlots() {
+  let slotsUpdated = false;
+  
+  for (let i = 0; i < wheelSlots.length; i++) {
+    if (wheelSlots[i] === null) {
+      // Cari user dari queue yang tidak ada di winners
+      const availableUsers = waitingQueue.filter(addr => 
+        !recentWinners.includes(addr) && !wheelSlots.includes(addr)
+      );
+      
+      if (availableUsers.length > 0) {
+        const nextUser = availableUsers[0];
+        wheelSlots[i] = nextUser;
+        waitingQueue = waitingQueue.filter(addr => addr !== nextUser);
+        slotsUpdated = true;
+        console.log(`🔄 Filled slot ${i} with ${formatAddress(nextUser)} from queue`);
+      }
+    }
+  }
+  
+  return slotsUpdated;
+}
+
 // ==================== SPIN LOCK FUNCTIONS ====================
 async function initializeSpinLock() {
   if (!supabase) {
@@ -167,7 +198,8 @@ async function initializeSpinStateTable() {
         spin_duration: 4000,
         spin_start_time: null,
         is_active: false,
-        participants_snapshot: '[]'
+        participants_snapshot: '[]',
+        random_seed: null
       });
     }
 
@@ -237,7 +269,7 @@ function fallbackSpinAnimation(targetRotation, duration, onComplete) {
 }
 
 // ==================== SYNCHRONIZED SPIN FUNCTIONS ====================
-// PERBAIKAN UTAMA: Fungsi untuk menentukan pemenang di server
+// PERBAIKAN UTAMA: Fungsi untuk menentukan pemenang di server dengan seed yang sama
 async function determineWinnerOnServer() {
   // PERBAIKAN: Jika tidak ada supabase, tentukan winner secara lokal
   if (!supabase) {
@@ -254,23 +286,36 @@ async function determineWinnerOnServer() {
       return null;
     }
 
-    // Generate deterministic random berdasarkan timestamp
-    const spinId = `spin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const winnerIndex = Math.floor(Math.random() * filledSlots.length);
+    // PERBAIKAN UTAMA: Generate seed berdasarkan timestamp yang dibulatkan (detik)
+    // Ini memastikan semua client yang spin di waktu yang sama menggunakan seed yang sama
+    const currentTimeSecond = Math.floor(Date.now() / 1000);
+    const randomSeed = currentTimeSecond; // Seed berdasarkan detik saat ini
+    
+    // PERBAIKAN UTAMA: Gunakan seeded random untuk hasil yang konsisten
+    const seededRandomValue = seededRandom(randomSeed);
+    const winnerIndex = Math.floor(seededRandomValue * filledSlots.length);
     const winnerSlot = filledSlots[winnerIndex].slotIndex;
     const winnerAddress = filledSlots[winnerIndex].address;
+
+    // Generate deterministic spin parameters berdasarkan seed yang sama
+    const spinSeed1 = seededRandom(randomSeed + 1);
+    const spinSeed2 = seededRandom(randomSeed + 2);
+    const spinSeed3 = seededRandom(randomSeed + 3);
 
     // Hitung target rotation berdasarkan slot pemenang
     const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
     const targetAngle = winnerSlot * anglePerSlot;
     
-    // Multiple rotations + target angle untuk animasi yang menarik
+    // Multiple rotations + target angle untuk animasi yang menarik (deterministic)
     const minSpins = 4;
     const maxSpins = 6;
-    const totalSpins = minSpins + Math.random() * (maxSpins - minSpins);
-    const targetRotation = totalSpins * 2 * Math.PI + (2 * Math.PI - targetAngle); // Hitung mundur karena pointer di atas
+    const totalSpins = minSpins + spinSeed1 * (maxSpins - minSpins);
+    const targetRotation = totalSpins * 2 * Math.PI + (2 * Math.PI - targetAngle);
 
-    const spinDuration = 3000 + Math.random() * 2000; // 3-5 detik
+    // Duration yang deterministic
+    const spinDuration = 3000 + spinSeed2 * 2000; // 3-5 detik
+    
+    const spinId = `spin_${randomSeed}_${currentTimeSecond}`;
     const spinStartTime = Date.now();
 
     // Simpan ke database
@@ -284,18 +329,21 @@ async function determineWinnerOnServer() {
         spin_duration: spinDuration,
         spin_start_time: spinStartTime,
         is_active: true,
-        participants_snapshot: JSON.stringify(filledSlots)
+        participants_snapshot: JSON.stringify(filledSlots),
+        random_seed: randomSeed
       })
       .eq('id', 1);
 
     if (error) throw error;
 
-    console.log('🎯 Winner determined on server:', {
+    console.log('🎯 Winner determined on server (deterministic):', {
       spinId,
+      randomSeed,
       winnerSlot,
       winnerAddress: formatAddress(winnerAddress),
       targetRotation: (targetRotation * 180 / Math.PI).toFixed(1) + '°',
-      spinDuration: (spinDuration / 1000).toFixed(1) + 's'
+      spinDuration: (spinDuration / 1000).toFixed(1) + 's',
+      seededRandomValue: seededRandomValue.toFixed(4)
     });
 
     return {
@@ -304,7 +352,8 @@ async function determineWinnerOnServer() {
       winnerAddress,
       targetRotation,
       spinDuration,
-      spinStartTime
+      spinStartTime,
+      randomSeed
     };
   } catch (error) {
     console.error('❌ Failed to determine winner on server:', error);
@@ -312,7 +361,7 @@ async function determineWinnerOnServer() {
   }
 }
 
-// PERBAIKAN: Fungsi untuk menentukan winner secara lokal sebagai fallback
+// PERBAIKAN: Fungsi untuk menentukan winner secara lokal sebagai fallback (juga deterministic)
 function determineWinnerLocally() {
   const filledSlots = wheelSlots.map((slot, index) => slot !== null ? { address: slot, slotIndex: index } : null)
                                 .filter(Boolean);
@@ -322,28 +371,38 @@ function determineWinnerLocally() {
     return null;
   }
 
-  const spinId = `local_spin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const winnerIndex = Math.floor(Math.random() * filledSlots.length);
+  // Gunakan seed yang sama seperti di server
+  const currentTimeSecond = Math.floor(Date.now() / 1000);
+  const randomSeed = currentTimeSecond;
+  
+  const seededRandomValue = seededRandom(randomSeed);
+  const winnerIndex = Math.floor(seededRandomValue * filledSlots.length);
   const winnerSlot = filledSlots[winnerIndex].slotIndex;
   const winnerAddress = filledSlots[winnerIndex].address;
+
+  const spinSeed1 = seededRandom(randomSeed + 1);
+  const spinSeed2 = seededRandom(randomSeed + 2);
 
   const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
   const targetAngle = winnerSlot * anglePerSlot;
   
   const minSpins = 4;
   const maxSpins = 6;
-  const totalSpins = minSpins + Math.random() * (maxSpins - minSpins);
+  const totalSpins = minSpins + spinSeed1 * (maxSpins - minSpins);
   const targetRotation = totalSpins * 2 * Math.PI + (2 * Math.PI - targetAngle);
 
-  const spinDuration = 3000 + Math.random() * 2000;
+  const spinDuration = 3000 + spinSeed2 * 2000;
   const spinStartTime = Date.now();
+  const spinId = `local_spin_${randomSeed}_${currentTimeSecond}`;
 
-  console.log('🎯 Winner determined locally:', {
+  console.log('🎯 Winner determined locally (deterministic):', {
     spinId,
+    randomSeed,
     winnerSlot,
     winnerAddress: formatAddress(winnerAddress),
     targetRotation: (targetRotation * 180 / Math.PI).toFixed(1) + '°',
-    spinDuration: (spinDuration / 1000).toFixed(1) + 's'
+    spinDuration: (spinDuration / 1000).toFixed(1) + 's',
+    seededRandomValue: seededRandomValue.toFixed(4)
   });
 
   return {
@@ -352,7 +411,8 @@ function determineWinnerLocally() {
     winnerAddress,
     targetRotation,
     spinDuration,
-    spinStartTime
+    spinStartTime,
+    randomSeed
   };
 }
 
@@ -377,7 +437,8 @@ async function getSpinResultFromServer() {
         targetRotation: data.target_rotation,
         spinDuration: data.spin_duration,
         spinStartTime: data.spin_start_time,
-        participantsSnapshot: JSON.parse(data.participants_snapshot || '[]')
+        participantsSnapshot: JSON.parse(data.participants_snapshot || '[]'),
+        randomSeed: data.random_seed
       };
     }
 
@@ -401,7 +462,8 @@ async function markSpinCompleted() {
         winner_slot: null,
         winner_address: null,
         target_rotation: 0,
-        spin_start_time: null
+        spin_start_time: null,
+        random_seed: null
       })
       .eq('id', 1);
 
@@ -457,6 +519,13 @@ async function handleRealTimeUpdate(payload) {
   clearTimeout(handleRealTimeUpdate.timeout);
   handleRealTimeUpdate.timeout = setTimeout(async () => {
     await loadGameState();
+    
+    // PERBAIKAN: Auto fill empty slots setelah update
+    const slotsUpdated = fillEmptySlots();
+    if (slotsUpdated) {
+      await saveGameState();
+    }
+    
     updateDisplay();
   }, 1000);
 }
@@ -825,8 +894,14 @@ async function validateAddress() {
       currentUser = address;
       showMessage('Congrats anda adalah holder! 🎉', 'success');
       await addUserToSystem(currentUser);
-      updateDisplay();
       
+      // PERBAIKAN: Auto fill empty slots setelah menambah user
+      const slotsUpdated = fillEmptySlots();
+      if (slotsUpdated) {
+        await saveGameState();
+      }
+      
+      updateDisplay();
       input.value = '';
     } else {
       showMessage('You are not a token holder ❌', 'error');
@@ -855,8 +930,10 @@ async function addUserToSystem(address) {
   const emptySlot = wheelSlots.findIndex(slot => !slot);
   if (emptySlot !== -1) {
     wheelSlots[emptySlot] = address;
+    console.log(`✅ Added ${formatAddress(address)} to slot ${emptySlot}`);
   } else {
     waitingQueue.push(address);
+    console.log(`✅ Added ${formatAddress(address)} to waiting queue`);
   }
 
   await saveGameState();
@@ -880,8 +957,10 @@ function startCountdown() {
       clearInterval(countdownInterval);
       countdownInterval = null;
       
-      // PERBAIKAN UTAMA: Periksa participant sebelum spin
+      // PERBAIKAN UTAMA: Periksa participant sebelum spin dan auto-fill
+      fillEmptySlots(); // Auto fill empty slots dari queue
       const filledSlots = wheelSlots.filter(Boolean);
+      
       if (filledSlots.length > 0 && !isSpinning) {
         console.log('⏰ Time up! Starting spin with', filledSlots.length, 'participants');
         performSpin();
@@ -915,6 +994,13 @@ async function performSpin() {
   if (isSpinning) {
     console.log('⚠️ Spin already in progress, skipping');
     return;
+  }
+
+  // PERBAIKAN: Auto fill empty slots sebelum spin
+  const slotsUpdated = fillEmptySlots();
+  if (slotsUpdated) {
+    await saveGameState();
+    updateDisplay();
   }
 
   const filledSlots = wheelSlots.filter(Boolean);
@@ -985,7 +1071,8 @@ async function synchronizedSpin(spinResult) {
     elapsedTime: elapsedTime + 'ms',
     remainingDuration: remainingDuration + 'ms',
     winnerSlot: spinResult.winnerSlot,
-    winnerAddress: formatAddress(spinResult.winnerAddress)
+    winnerAddress: formatAddress(spinResult.winnerAddress),
+    randomSeed: spinResult.randomSeed
   });
 
   // Show spinning message
@@ -1025,7 +1112,8 @@ async function selectWinnerFromServer(spinResult) {
 
   console.log('🎯 Processing server-determined winner:', {
     winnerSlot,
-    winnerAddress: formatAddress(winnerAddress)
+    winnerAddress: formatAddress(winnerAddress),
+    randomSeed: spinResult.randomSeed
   });
 
   // Highlight winning slot
@@ -1049,17 +1137,14 @@ async function selectWinnerFromServer(spinResult) {
 
     // Remove from wheel
     wheelSlots[winnerSlot] = null;
-
-    // Fill empty slot from queue (excluding winners)
-    const availableQueueUsers = waitingQueue.filter(addr => !recentWinners.includes(addr));
-    if (availableQueueUsers.length > 0) {
-      const nextUser = availableQueueUsers[0];
-      wheelSlots[winnerSlot] = nextUser;
-      waitingQueue = waitingQueue.filter(addr => addr !== nextUser);
-    }
+    console.log(`🎯 Winner ${formatAddress(winnerAddress)} removed from slot ${winnerSlot}`);
 
     // Remove winner from queue if they were there
     waitingQueue = waitingQueue.filter(addr => addr !== winnerAddress);
+    
+    // PERBAIKAN: Auto fill empty slots setelah ada pemenang
+    const slotsUpdated = fillEmptySlots();
+    console.log(`🔄 Auto-filled ${slotsUpdated ? 'some' : 'no'} empty slots from queue`);
 
     await saveGameState();
     updateDisplay();
@@ -1278,6 +1363,13 @@ async function initializeGame() {
     await loadGameState();
     console.log('✅ Game state loaded');
 
+    // PERBAIKAN: Auto fill empty slots saat startup
+    const slotsUpdated = fillEmptySlots();
+    if (slotsUpdated) {
+      await saveGameState();
+      console.log('✅ Auto-filled empty slots on startup');
+    }
+
     initializeWheel();
     updateDisplay();
 
@@ -1372,6 +1464,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         <button onclick="window.debugFunctions.checkLockStatus()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔍 Check Lock</button>
         <br>
         <button onclick="window.debugFunctions.resetSpin()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔄 Reset Spin</button>
+        <button onclick="window.debugFunctions.fillSlots()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔄 Fill Slots</button>
         <div style="margin-top: 8px; font-size: 10px; color: #888;">
           Timer: <span id="debugTimer">--:--</span><br>
           Participants: <span id="debugParticipants">0</span><br>
@@ -1471,6 +1564,18 @@ document.addEventListener('DOMContentLoaded', async function() {
           wheelRotation = 0;
           initializeWheel();
           console.log('🔧 Spin state completely reset');
+        },
+
+        // PERBAIKAN: Tambahan fungsi untuk fill slots manual
+        fillSlots: async () => {
+          const filled = fillEmptySlots();
+          if (filled) {
+            await saveGameState();
+            updateDisplay();
+            console.log('🔧 Empty slots filled from queue');
+          } else {
+            console.log('🔧 No empty slots to fill or no queue available');
+          }
         }
       };
       
@@ -1489,6 +1594,12 @@ document.addEventListener('visibilitychange', function() {
   if (!document.hidden && gameInitialized) {
     console.log('🔄 Page became visible, syncing game state...');
     loadGameState().then(() => {
+      // PERBAIKAN: Auto fill empty slots saat page visible
+      const slotsUpdated = fillEmptySlots();
+      if (slotsUpdated) {
+        saveGameState();
+      }
+      
       updateDisplay();
       if (!countdownInterval) {
         startCountdown();
