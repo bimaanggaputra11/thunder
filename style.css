@@ -221,7 +221,7 @@ body {
 }
 
 #wheelCanvas {
-  border: 4px solid #333;
+  border: 4px solid #f6f6f6;
   border-radius: 50%;
   background:#18423d;
   /* PERBAIKAN: Tambahkan shadow untuk depth */
@@ -250,7 +250,7 @@ body {
 }
 
 .countdown-label {
-  color: #ffffff;
+  color:#c5b52a;
   margin-bottom: 10px;
 }
 
@@ -280,7 +280,7 @@ body {
 }
 
 .stat-card h3 {
-  color: #ffffff;
+  color: #c5b52a;
   font-size: 0.9rem;
   margin-bottom: 5px;
 }

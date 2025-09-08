@@ -752,7 +752,7 @@ function initializeWheel() {
     ctx.lineTo(centerX, centerY);
     
     if (wheelSlots[i]) {
-      ctx.fillStyle = i % 2 === 0 ? '#18423d' : '#e8e8e8';
+      ctx.fillStyle = i % 2 === 0 ? '#305b4c' : '#e8e8e8';
     } else {
       ctx.fillStyle = '#ffffff';
     }
@@ -770,7 +770,7 @@ function initializeWheel() {
       ctx.save();
       ctx.translate(textX, textY);
       ctx.rotate(textAngle + Math.PI / 2);
-      ctx.fillStyle = '#333';
+      ctx.fillStyle = '#c5b52a';
       ctx.font = 'bold 10px Arial';
       ctx.textAlign = 'center';
       ctx.fillText(formatAddress(wheelSlots[i]), 0, 0);
@@ -799,11 +799,11 @@ function initializeWheel() {
 
   // Draw pointer at top 
   ctx.beginPath();
-  ctx.moveTo(centerX, centerY - radius - 20); 
-  ctx.lineTo(centerX - 15, centerY - radius - 5); 
-  ctx.lineTo(centerX + 15, centerY - radius - 5); 
+  ctx.moveTo(centerX, centerY - radius - 1); 
+  ctx.lineTo(centerX - 15, centerY - radius - 15); 
+  ctx.lineTo(centerX + 15, centerY - radius - 15); 
   ctx.closePath();
-  ctx.fillStyle = '#ff4444'; 
+  ctx.fillStyle = '#c5b52a'; 
   ctx.fill();
   ctx.strokeStyle = '#333';
   ctx.lineWidth = 2;
@@ -811,9 +811,9 @@ function initializeWheel() {
 
   // Add pointer shadow
   ctx.beginPath();
-  ctx.moveTo(centerX + 2, centerY - radius - 18);
-  ctx.lineTo(centerX - 13, centerY - radius - 3);
-  ctx.lineTo(centerX + 17, centerY - radius - 3);
+  ctx.moveTo(centerX + 2, centerY - radius - 1);
+  ctx.lineTo(centerX - 13, centerY - radius - 13);
+  ctx.lineTo(centerX + 17, centerY - radius - 13);
   ctx.closePath();
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fill();
