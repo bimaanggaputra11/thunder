@@ -735,7 +735,7 @@ function initializeWheel() {
   const ctx = canvas.getContext('2d');
   const centerX = canvas.width / 2;
   const centerY = canvas.height / 2;
-  const radius = 140;
+  const radius = 280;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -752,7 +752,7 @@ function initializeWheel() {
     ctx.lineTo(centerX, centerY);
     
     if (wheelSlots[i]) {
-      ctx.fillStyle = i % 2 === 0 ? '#f8f8f8' : '#e8e8e8';
+      ctx.fillStyle = i % 2 === 0 ? '#18423d' : '#e8e8e8';
     } else {
       ctx.fillStyle = '#ffffff';
     }

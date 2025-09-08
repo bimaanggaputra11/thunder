@@ -206,11 +206,11 @@ body {
 
 /* Wheel Section */
 .wheel-section {
-  background: white;
+  background: transparent;
   border-radius: 20px;
   padding: 20px;
   text-align: center;
-  box-shadow: 0 5px 20px rgba(0,0,0,0.1); /* PERBAIKAN: Tambahkan shadow untuk konsistensi */
+  box-shadow: transparent;
 }
 
 .wheel-container {
@@ -231,6 +231,9 @@ body {
 /* Countdown Timer */
 .countdown-section {
   background: white;
+  background-image: url(img/bgpart1.jpg);
+  background-position:center;
+  background-size: 100%;
   border-radius: 15px;
   padding: 15px;
   margin: 20px 0;
@@ -241,13 +244,13 @@ body {
 .countdown-timer {
   font-size: 2rem;
   font-weight: bold;
-  color: #333;
+  color: #ffffff;
   /* PERBAIKAN: Tambahkan font monospace untuk timer */
   font-family: 'Courier New', monospace;
 }
 
 .countdown-label {
-  color: #666;
+  color: #ffffff;
   margin-bottom: 10px;
 }
 
@@ -260,7 +263,10 @@ body {
 
 .stat-card {
   flex: 1;
-  background: white;
+  background: rgb(236, 236, 236);
+    background-image: url(img/bgpart2.jpg);
+  background-position:center;
+  background-size: 200%;
   border-radius: 15px;
   padding: 15px;
   text-align: center;
@@ -274,7 +280,7 @@ body {
 }
 
 .stat-card h3 {
-  color: #666;
+  color: #ffffff;
   font-size: 0.9rem;
   margin-bottom: 5px;
 }
@@ -282,7 +288,7 @@ body {
 .stat-number {
   font-size: 1.5rem;
   font-weight: bold;
-  color: #333;
+  color: #ffffff;
 }
 
 /* Lists Section */
