@@ -90,7 +90,9 @@ body {
 
 /* Validation Section */
 .validation-card {
-  background: rgb(192, 174, 174);
+  background: rgb(255, 255, 255); 
+  background-image: url(img/photo_2025-09-08_23-33-11.jpg);
+  background-size:100%;
   border-radius: 20px;
   padding: 30px;
   text-align: center;
@@ -98,13 +100,13 @@ body {
 }
 
 .validation-card h2 {
-  color: #333;
+  color: #c5b52a;
   margin-bottom: 10px;
   font-size: 1.5rem;
 }
 
 .validation-card p {
-  color: #666;
+  color: #c5b52a;
   margin-bottom: 20px;
 }
 
@@ -116,7 +118,7 @@ body {
   display: block;
   margin-bottom: 8px;
   font-weight: bold;
-  color: #555;
+  color: #ffffff;
   text-align: left;
 }
 
@@ -132,12 +134,12 @@ body {
 
 .input-group input:focus {
   outline: none;
-  border-color: #1565c0;
+  border-color: #c5b52a;
   box-shadow: 0 0 0 3px rgba(21, 101, 192, 0.1);
 }
 
 .verify-btn {
-  background: #1565c0;
+  background: #c5b52a;
   color: white;
   border: none;
   padding: 12px 30px;
@@ -221,7 +223,7 @@ body {
 #wheelCanvas {
   border: 4px solid #333;
   border-radius: 50%;
-  background: white;
+  background:#18423d;
   /* PERBAIKAN: Tambahkan shadow untuk depth */
   box-shadow: 0 8px 25px rgba(0,0,0,0.15);
 }
