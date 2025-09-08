@@ -208,14 +208,45 @@ async function releaseSpinLock() {
   }
 }
 
+// ==================== FALLBACK SPIN FUNCTIONS ====================
+// PERBAIKAN: Fungsi fallback jika GSAP tidak tersedia
+function fallbackSpinAnimation(targetRotation, duration, onComplete) {
+  console.log('⚠️ Using fallback animation (GSAP not available)');
+  
+  const startTime = performance.now();
+  const startRotation = wheelRotation;
+  
+  function animate(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Easing function (cubic-bezier approximation)
+    const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+    
+    wheelRotation = startRotation + targetRotation * easeOutCubic;
+    initializeWheel();
+    
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      onComplete();
+    }
+  }
+  
+  requestAnimationFrame(animate);
+}
+
 // ==================== SYNCHRONIZED SPIN FUNCTIONS ====================
 // PERBAIKAN UTAMA: Fungsi untuk menentukan pemenang di server
 async function determineWinnerOnServer() {
-  if (!supabase) return null;
+  // PERBAIKAN: Jika tidak ada supabase, tentukan winner secara lokal
+  if (!supabase) {
+    return determineWinnerLocally();
+  }
 
   try {
     // Ambil participants aktif saat ini
-    const filledSlots = wheelSlots.filter((slot, index) => slot !== null ? { address: slot, slotIndex: index } : null)
+    const filledSlots = wheelSlots.map((slot, index) => slot !== null ? { address: slot, slotIndex: index } : null)
                                   .filter(Boolean);
 
     if (filledSlots.length === 0) {
@@ -277,8 +308,52 @@ async function determineWinnerOnServer() {
     };
   } catch (error) {
     console.error('❌ Failed to determine winner on server:', error);
+    return determineWinnerLocally(); // Fallback ke local
+  }
+}
+
+// PERBAIKAN: Fungsi untuk menentukan winner secara lokal sebagai fallback
+function determineWinnerLocally() {
+  const filledSlots = wheelSlots.map((slot, index) => slot !== null ? { address: slot, slotIndex: index } : null)
+                                .filter(Boolean);
+
+  if (filledSlots.length === 0) {
+    console.log('⚠️ No participants to determine winner from');
     return null;
   }
+
+  const spinId = `local_spin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const winnerIndex = Math.floor(Math.random() * filledSlots.length);
+  const winnerSlot = filledSlots[winnerIndex].slotIndex;
+  const winnerAddress = filledSlots[winnerIndex].address;
+
+  const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
+  const targetAngle = winnerSlot * anglePerSlot;
+  
+  const minSpins = 4;
+  const maxSpins = 6;
+  const totalSpins = minSpins + Math.random() * (maxSpins - minSpins);
+  const targetRotation = totalSpins * 2 * Math.PI + (2 * Math.PI - targetAngle);
+
+  const spinDuration = 3000 + Math.random() * 2000;
+  const spinStartTime = Date.now();
+
+  console.log('🎯 Winner determined locally:', {
+    spinId,
+    winnerSlot,
+    winnerAddress: formatAddress(winnerAddress),
+    targetRotation: (targetRotation * 180 / Math.PI).toFixed(1) + '°',
+    spinDuration: (spinDuration / 1000).toFixed(1) + 's'
+  });
+
+  return {
+    spinId,
+    winnerSlot,
+    winnerAddress,
+    targetRotation,
+    spinDuration,
+    spinStartTime
+  };
 }
 
 // PERBAIKAN UTAMA: Fungsi untuk mengambil hasil spin dari server
@@ -805,12 +880,17 @@ function startCountdown() {
       clearInterval(countdownInterval);
       countdownInterval = null;
       
+      // PERBAIKAN UTAMA: Periksa participant sebelum spin
       const filledSlots = wheelSlots.filter(Boolean);
       if (filledSlots.length > 0 && !isSpinning) {
         console.log('⏰ Time up! Starting spin with', filledSlots.length, 'participants');
         performSpin();
+      } else if (filledSlots.length === 0) {
+        console.log('⚠️ No participants, resetting timer');
+        countdownTimer = SPIN_INTERVAL;
+        startCountdown();
       } else {
-        console.log('⚠️ Time up but no participants or already spinning, resetting timer');
+        console.log('⚠️ Already spinning, waiting...');
         countdownTimer = SPIN_INTERVAL;
         startCountdown();
       }
@@ -849,6 +929,12 @@ async function performSpin() {
   const lockAcquired = await acquireSpinLock();
   if (!lockAcquired && supabase) {
     console.log('⚠️ Could not acquire spin lock, another instance is spinning');
+    // Cek apakah ada spin yang sedang berlangsung
+    const ongoingSpin = await getSpinResultFromServer();
+    if (ongoingSpin) {
+      console.log('🔄 Found ongoing spin, syncing...');
+      await synchronizedSpin(ongoingSpin);
+    }
     return;
   }
 
@@ -886,12 +972,6 @@ async function performSpin() {
 
 // PERBAIKAN UTAMA: Fungsi untuk melakukan spin tersinkronisasi berdasarkan hasil server
 async function synchronizedSpin(spinResult) {
-  if (typeof gsap === 'undefined') {
-    console.error('❌ GSAP library tidak tersedia');
-    selectWinnerFromServer(spinResult);
-    return;
-  }
-
   const { targetRotation, spinDuration, spinStartTime } = spinResult;
   
   // Hitung delay jika client join di tengah spin
@@ -911,24 +991,32 @@ async function synchronizedSpin(spinResult) {
   // Show spinning message
   showMessage('🎪 Wheel is spinning...', 'info');
 
-  // PERBAIKAN UTAMA: Animasi menuju target rotation yang SAMA untuk semua client
-  gsap.to({ rotation: wheelRotation }, {
-    rotation: wheelRotation + targetRotation,
-    duration: remainingDuration / 1000,
-    ease: "power3.out",
-    onUpdate: function() {
-      wheelRotation = this.targets()[0].rotation;
-      initializeWheel();
-    },
-    onComplete: function() {
-      console.log('🎪 Synchronized spin animation completed');
-      const msg = document.getElementById('message');
-      if (msg && msg.innerHTML.includes('spinning')) {
-        msg.innerHTML = '';
-      }
-      selectWinnerFromServer(spinResult);
+  // PERBAIKAN UTAMA: Gunakan fallback jika GSAP tidak tersedia
+  const onComplete = function() {
+    console.log('🎪 Synchronized spin animation completed');
+    const msg = document.getElementById('message');
+    if (msg && msg.innerHTML.includes('spinning')) {
+      msg.innerHTML = '';
     }
-  });
+    selectWinnerFromServer(spinResult);
+  };
+
+  if (typeof gsap !== 'undefined') {
+    // PERBAIKAN: Animasi menuju target rotation yang SAMA untuk semua client
+    gsap.to({ rotation: wheelRotation }, {
+      rotation: wheelRotation + targetRotation,
+      duration: remainingDuration / 1000,
+      ease: "power3.out",
+      onUpdate: function() {
+        wheelRotation = this.targets()[0].rotation;
+        initializeWheel();
+      },
+      onComplete: onComplete
+    });
+  } else {
+    // PERBAIKAN: Fallback animation jika GSAP tidak tersedia
+    fallbackSpinAnimation(targetRotation, remainingDuration, onComplete);
+  }
 }
 
 // PERBAIKAN UTAMA: Fungsi untuk memproses pemenang berdasarkan hasil server
@@ -1193,6 +1281,7 @@ async function initializeGame() {
     initializeWheel();
     updateDisplay();
 
+    // PERBAIKAN: Pastikan countdown dimulai dengan benar
     if (!countdownInterval) {
       console.log('⏰ Starting countdown timer');
       startCountdown();
@@ -1206,6 +1295,7 @@ async function initializeGame() {
     console.error('❌ Failed to initialize game:', error);
     showMessage('Failed to load game. Some features may not work properly.', 'error');
     
+    // Fallback initialization
     wheelSlots = Array(WHEEL_SLOTS).fill(null);
     waitingQueue = [];
     recentWinners = [];
@@ -1264,7 +1354,7 @@ document.addEventListener('DOMContentLoaded', async function() {
       }
     });
 
-    // Debug mode
+    // Debug mode dengan perbaikan tambahan
     const debugMode = window.location.hash.includes('debug') || window.location.search.includes('debug');
     if (debugMode) {
       const debugPanel = document.createElement('div');
@@ -1280,6 +1370,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         <br>
         <button onclick="window.debugFunctions.forceReleaseLock()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔓 Force Release</button>
         <button onclick="window.debugFunctions.checkLockStatus()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔍 Check Lock</button>
+        <br>
+        <button onclick="window.debugFunctions.resetSpin()" style="margin: 2px; padding: 5px 8px; font-size: 11px;">🔄 Reset Spin</button>
         <div style="margin-top: 8px; font-size: 10px; color: #888;">
           Timer: <span id="debugTimer">--:--</span><br>
           Participants: <span id="debugParticipants">0</span><br>
@@ -1369,6 +1461,16 @@ document.addEventListener('DOMContentLoaded', async function() {
             console.log('🔧 Lock status in DB:', data?.value || 'not found');
           }
           console.log('🔧 Local spinning flag:', isSpinning);
+        },
+
+        // PERBAIKAN: Tambahan fungsi reset spin state
+        resetSpin: async () => {
+          await releaseSpinLock();
+          await markSpinCompleted();
+          isSpinning = false;
+          wheelRotation = 0;
+          initializeWheel();
+          console.log('🔧 Spin state completely reset');
         }
       };
       
