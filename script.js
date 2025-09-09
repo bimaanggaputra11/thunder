@@ -2,15 +2,15 @@
 const SUPABASE_URL = 'https://bewuevhfiehsjofvwpbi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJld3VldmhmaWVoc2pvZnZ3cGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxNjA1MDEsImV4cCI6MjA3MjczNjUwMX0.o7KJ4gkbfZKYy3lvuV63yGM5XCnk5xk4vCLv46hNAII';
 
-// PERBAIKAN: Gunakan window.supabase atau pastikan library dimuat
+
 const supabase = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Configuration
 const TOKEN_MINT = "ACbRrERR5GJnADhLhhanxrDCXJzGhyF64SKihbzBpump";
 const WHEEL_SLOTS = 50; // Number of slots in the wheel
-const SPIN_INTERVAL = 5 * 60; // 5 minutes in seconds
+const SPIN_INTERVAL = 30 * 60; 
 
-// PERBAIKAN: Inisialisasi variabel game state dengan nilai default
+
 let wheelSlots = Array(WHEEL_SLOTS).fill(null);
 let waitingQueue = [];
 let recentWinners = []; 
@@ -24,14 +24,14 @@ let realTimeSubscription = null;
 let gameInitialized = false; 
 let countdownInterval = null; 
 
-// PERBAIKAN UTAMA: Tambahan variabel untuk synchronized spinning
-let currentSpinId = null; // ID untuk spin saat ini
-let targetWinnerSlot = null; // Slot pemenang yang ditentukan server
-let spinStartTime = null; // Waktu mulai spin yang disinkronkan
 
-// Cek apakah Supabase tersedia
+let currentSpinId = null; 
+let targetWinnerSlot = null; 
+let spinStartTime = null; 
+
+
 if (!supabase) {
-  console.error('❌ Supabase client tidak dapat diinisialisasi. Pastikan library Supabase sudah dimuat.');
+  console.error('❌ Supabase client could not be initialized. Make sure the Supabase library is loaded.');
 }
 
 // ==================== UTILITY FUNCTIONS ====================
@@ -94,7 +94,7 @@ function showMessage(text, type) {
 function animateNumber(element, from, to) {
   if (from === to) return;
   
-  const duration = 500;
+  const duration = 3000;
   const startTime = performance.now();
   
   function update(currentTime) {
@@ -114,20 +114,20 @@ function animateNumber(element, from, to) {
   requestAnimationFrame(update);
 }
 
-// PERBAIKAN UTAMA: Fungsi seeded random untuk hasil yang konsisten
+
 function seededRandom(seed) {
   let x = Math.sin(seed) * 10000;
   return x - Math.floor(x);
 }
 
 // ==================== AUTO FILL EMPTY SLOTS ====================
-// PERBAIKAN: Fungsi untuk mengisi slot kosong dari queue
+
 function fillEmptySlots() {
   let slotsUpdated = false;
   
   for (let i = 0; i < wheelSlots.length; i++) {
     if (wheelSlots[i] === null) {
-      // Cari user dari queue yang tidak ada di winners
+      
       const availableUsers = waitingQueue.filter(addr => 
         !recentWinners.includes(addr) && !wheelSlots.includes(addr)
       );
@@ -148,7 +148,7 @@ function fillEmptySlots() {
 // ==================== SPIN LOCK FUNCTIONS ====================
 async function initializeSpinLock() {
   if (!supabase) {
-    console.warn('⚠️ Supabase tidak tersedia, menggunakan local spin lock');
+    console.warn('⚠️ Supabase is not available, uses local spin lock');
     return;
   }
 
@@ -167,7 +167,7 @@ async function initializeSpinLock() {
       });
     }
 
-    // PERBAIKAN UTAMA: Initialize spin state table untuk menyimpan hasil spin
+    
     await initializeSpinStateTable();
 
     console.log('✅ Spin lock initialized');
@@ -176,19 +176,19 @@ async function initializeSpinLock() {
   }
 }
 
-// PERBAIKAN UTAMA: Inisialisasi tabel untuk menyimpan state spin
+
 async function initializeSpinStateTable() {
   if (!supabase) return;
 
   try {
-    // Cek apakah tabel spin_state sudah ada data
+    
     const { data: existing } = await supabase
       .from('spin_state')
       .select('*')
       .maybeSingle();
 
     if (!existing) {
-      // Buat entry default
+      
       await supabase.from('spin_state').insert({
         id: 1,
         spin_id: null,
@@ -241,7 +241,7 @@ async function releaseSpinLock() {
 }
 
 // ==================== FALLBACK SPIN FUNCTIONS ====================
-// PERBAIKAN: Fungsi fallback jika GSAP tidak tersedia
+
 function fallbackSpinAnimation(targetRotation, duration, onComplete) {
   console.log('⚠️ Using fallback animation (GSAP not available)');
   
@@ -269,15 +269,15 @@ function fallbackSpinAnimation(targetRotation, duration, onComplete) {
 }
 
 // ==================== SYNCHRONIZED SPIN FUNCTIONS ====================
-// PERBAIKAN UTAMA: Fungsi untuk menentukan pemenang di server dengan seed yang sama
+
 async function determineWinnerOnServer() {
-  // PERBAIKAN: Jika tidak ada supabase, tentukan winner secara lokal
+  
   if (!supabase) {
     return determineWinnerLocally();
   }
 
   try {
-    // Ambil participants aktif saat ini
+    
     const filledSlots = wheelSlots.map((slot, index) => slot !== null ? { address: slot, slotIndex: index } : null)
                                   .filter(Boolean);
 
@@ -286,39 +286,38 @@ async function determineWinnerOnServer() {
       return null;
     }
 
-    // PERBAIKAN UTAMA: Generate seed berdasarkan timestamp yang dibulatkan (detik)
-    // Ini memastikan semua client yang spin di waktu yang sama menggunakan seed yang sama
-    const currentTimeSecond = Math.floor(Date.now() / 1000);
-    const randomSeed = currentTimeSecond; // Seed berdasarkan detik saat ini
     
-    // PERBAIKAN UTAMA: Gunakan seeded random untuk hasil yang konsisten
+    const currentTimeSecond = Math.floor(Date.now() / 1000);
+    const randomSeed = currentTimeSecond; 
+    
+    
     const seededRandomValue = seededRandom(randomSeed);
     const winnerIndex = Math.floor(seededRandomValue * filledSlots.length);
     const winnerSlot = filledSlots[winnerIndex].slotIndex;
     const winnerAddress = filledSlots[winnerIndex].address;
 
-    // Generate deterministic spin parameters berdasarkan seed yang sama
+    
     const spinSeed1 = seededRandom(randomSeed + 1);
     const spinSeed2 = seededRandom(randomSeed + 2);
     const spinSeed3 = seededRandom(randomSeed + 3);
 
-    // Hitung target rotation berdasarkan slot pemenang
+    
     const anglePerSlot = (2 * Math.PI) / WHEEL_SLOTS;
     const targetAngle = winnerSlot * anglePerSlot;
     
-    // Multiple rotations + target angle untuk animasi yang menarik (deterministic)
+    
     const minSpins = 4;
     const maxSpins = 6;
     const totalSpins = minSpins + spinSeed1 * (maxSpins - minSpins);
     const targetRotation = totalSpins * 2 * Math.PI + (2 * Math.PI - targetAngle);
 
-    // Duration yang deterministic
-    const spinDuration = 3000 + spinSeed2 * 2000; // 3-5 detik
+    
+    const spinDuration = 3000 + spinSeed2 * 2000; 
     
     const spinId = `spin_${randomSeed}_${currentTimeSecond}`;
     const spinStartTime = Date.now();
 
-    // Simpan ke database
+    
     const { error } = await supabase
       .from('spin_state')
       .update({
@@ -357,11 +356,11 @@ async function determineWinnerOnServer() {
     };
   } catch (error) {
     console.error('❌ Failed to determine winner on server:', error);
-    return determineWinnerLocally(); // Fallback ke local
+    return determineWinnerLocally(); 
   }
 }
 
-// PERBAIKAN: Fungsi untuk menentukan winner secara lokal sebagai fallback (juga deterministic)
+
 function determineWinnerLocally() {
   const filledSlots = wheelSlots.map((slot, index) => slot !== null ? { address: slot, slotIndex: index } : null)
                                 .filter(Boolean);
@@ -371,7 +370,7 @@ function determineWinnerLocally() {
     return null;
   }
 
-  // Gunakan seed yang sama seperti di server
+  
   const currentTimeSecond = Math.floor(Date.now() / 1000);
   const randomSeed = currentTimeSecond;
   
@@ -416,7 +415,7 @@ function determineWinnerLocally() {
   };
 }
 
-// PERBAIKAN UTAMA: Fungsi untuk mengambil hasil spin dari server
+
 async function getSpinResultFromServer() {
   if (!supabase) return null;
 
@@ -449,7 +448,7 @@ async function getSpinResultFromServer() {
   }
 }
 
-// PERBAIKAN UTAMA: Fungsi untuk menandai spin selesai
+
 async function markSpinCompleted() {
   if (!supabase) return;
 
@@ -476,12 +475,12 @@ async function markSpinCompleted() {
 // ==================== REAL-TIME SYNC FUNCTIONS ====================
 async function setupRealTimeSync() {
   if (!supabase) {
-    console.warn('⚠️ Supabase tidak tersedia, real-time sync dinonaktifkan');
+    console.warn('⚠️Supabase not available, real-time sync disabled');
     return;
   }
 
   try {
-    // Subscribe to changes in wheel_slots, queue_list, winners_list, dan spin_state
+    
     realTimeSubscription = supabase
       .channel('game_updates')
       .on('postgres_changes', 
@@ -500,7 +499,7 @@ async function setupRealTimeSync() {
         { event: '*', schema: 'public', table: 'settings' },
         handleRealTimeUpdate
       )
-      // PERBAIKAN UTAMA: Listen untuk perubahan spin_state
+     
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'spin_state' },
         handleSpinStateUpdate
@@ -520,7 +519,7 @@ async function handleRealTimeUpdate(payload) {
   handleRealTimeUpdate.timeout = setTimeout(async () => {
     await loadGameState();
     
-    // PERBAIKAN: Auto fill empty slots setelah update
+    
     const slotsUpdated = fillEmptySlots();
     if (slotsUpdated) {
       await saveGameState();
@@ -530,12 +529,12 @@ async function handleRealTimeUpdate(payload) {
   }, 1000);
 }
 
-// PERBAIKAN UTAMA: Handle update untuk spin state
+
 async function handleSpinStateUpdate(payload) {
   console.log('🎪 Spin state update received:', payload);
   
   if (payload.eventType === 'UPDATE' && payload.new.is_active && !isSpinning) {
-    // Ada spin baru yang dimulai dari client lain
+    
     const spinResult = await getSpinResultFromServer();
     if (spinResult) {
       console.log('🔄 Syncing to ongoing spin from another client');
@@ -547,7 +546,7 @@ async function handleSpinStateUpdate(payload) {
 // ==================== DATABASE FUNCTIONS ====================
 async function saveGameState() {
   if (!supabase) {
-    console.error('❌ Supabase client tidak tersedia');
+    console.error('❌ Supabase client is not available');
     return;
   }
 
@@ -604,7 +603,7 @@ async function saveGameState() {
 
 async function loadGameState() {
   if (!supabase) {
-    console.error('❌ Supabase client tidak tersedia');
+    console.error('❌ Supabase client is not available');
     return;
   }
 
@@ -679,7 +678,7 @@ async function loadGameState() {
       ], { onConflict: 'key' });
     }
 
-    // PERBAIKAN UTAMA: Cek apakah ada spin yang sedang berlangsung
+    
     const ongoingSpin = await getSpinResultFromServer();
     if (ongoingSpin && !isSpinning) {
       console.log('🔄 Found ongoing spin, syncing...');
@@ -701,7 +700,7 @@ async function loadGameState() {
 
 async function updateSpinTimestamp() {
   if (!supabase) {
-    console.error('❌ Supabase client tidak tersedia');
+    console.error('❌ Supabase client is not available');
     return;
   }
 
@@ -728,7 +727,7 @@ async function updateSpinTimestamp() {
 function initializeWheel() {
   const canvas = document.getElementById('wheelCanvas');
   if (!canvas) {
-    console.error('❌ Canvas element tidak ditemukan');
+    console.error('❌ Canvas element not found');
     return;
   }
 
@@ -745,8 +744,7 @@ function initializeWheel() {
   for (let i = 0; i < WHEEL_SLOTS; i++) {
     const startAngle = i * anglePerSlot + wheelRotation;
     const endAngle = (i + 1) * anglePerSlot + wheelRotation;
-    
-    // Segment background
+
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, startAngle, endAngle);
     ctx.lineTo(centerX, centerY);
@@ -767,18 +765,18 @@ function initializeWheel() {
 const textAngle = startAngle + anglePerSlot / 1.5;
 ctx.save();
 
-// Rotasi dan translasi teks ke posisi yang sesuai
+
 ctx.translate(centerX, centerY);
-ctx.rotate(textAngle); // Rotasi agar searah segmen
+ctx.rotate(textAngle); 
 
 ctx.textAlign = 'center';
 ctx.fillStyle = wheelSlots[i] ? '#c5b52a' : '#999';
 ctx.font = wheelSlots[i] ? 'bold 10px Arial' : '8px Arial';
 
-// Tampilkan teks lebih ke dalam roda (bukan di tepi luar)
+
 ctx.fillText(
   wheelSlots[i] ? formatAddress(wheelSlots[i]) : 'Address holder',
-  radius * 0.5, // Ubah jarak dari pusat (lebih kecil dari sebelumnya)
+  radius * 0.5, 
   0
 );
 
@@ -789,18 +787,18 @@ ctx.restore();
 const textAngle = startAngle + anglePerSlot / 2;
 ctx.save();
 
-// Rotasi dan translasi teks ke posisi yang sesuai
+
 ctx.translate(centerX, centerY);
-ctx.rotate(textAngle); // Rotasi agar searah segmen
+ctx.rotate(textAngle); 
 
 ctx.textAlign = 'center';
 ctx.fillStyle = wheelSlots[i] ? '#c5b52a' : '#999';
 ctx.font = wheelSlots[i] ? 'bold 10px Arial' : '8px Arial';
 
-// Tampilkan teks lebih ke dalam roda (bukan di tepi luar)
+
 ctx.fillText(
   wheelSlots[i] ? formatAddress(wheelSlots[i]) : 'Address holder',
-  radius * 0.5, // Ubah jarak dari pusat (lebih kecil dari sebelumnya)
+  radius * 0.5, 
   0
 );
 
@@ -857,7 +855,7 @@ async function validateAddress() {
   const validationCard = document.querySelector('.validation-card');
   
   if (!input || !msg) {
-    console.error('❌ Element tidak ditemukan');
+    console.error('❌ Element not found');
     return;
   }
 
@@ -878,7 +876,7 @@ async function validateAddress() {
   }
 
   if (!Array.isArray(recentWinners)) {
-    console.warn('⚠️ recentWinners belum diinisialisasi, menggunakan array kosong');
+    console.warn('⚠️ recentWinners has not been initialized, using an empty array');
     recentWinners = [];
   }
 
@@ -901,10 +899,10 @@ async function validateAddress() {
     
     if (isHolder) {
       currentUser = address;
-      showMessage('Congrats anda adalah holder! 🎉', 'success');
+      showMessage('Congratulations, you are the holder! 🎉', 'success');
       await addUserToSystem(currentUser);
       
-      // PERBAIKAN: Auto fill empty slots setelah menambah user
+      
       const slotsUpdated = fillEmptySlots();
       if (slotsUpdated) {
         await saveGameState();
@@ -966,8 +964,8 @@ function startCountdown() {
       clearInterval(countdownInterval);
       countdownInterval = null;
       
-      // PERBAIKAN UTAMA: Periksa participant sebelum spin dan auto-fill
-      fillEmptySlots(); // Auto fill empty slots dari queue
+      
+      fillEmptySlots(); 
       const filledSlots = wheelSlots.filter(Boolean);
       
       if (filledSlots.length > 0 && !isSpinning) {
@@ -996,7 +994,7 @@ function updateCountdownDisplay() {
 }
 
 // ==================== SYNCHRONIZED SPIN FUNCTIONS ====================
-// PERBAIKAN UTAMA: Spin function yang menentukan pemenang di server terlebih dahulu
+
 async function performSpin() {
   console.log('🎪 performSpin called - isSpinning:', isSpinning);
   
@@ -1005,7 +1003,7 @@ async function performSpin() {
     return;
   }
 
-  // PERBAIKAN: Auto fill empty slots sebelum spin
+  
   const slotsUpdated = fillEmptySlots();
   if (slotsUpdated) {
     await saveGameState();
@@ -1020,11 +1018,11 @@ async function performSpin() {
     return;
   }
 
-  // PERBAIKAN UTAMA: Try to acquire spin lock
+
   const lockAcquired = await acquireSpinLock();
   if (!lockAcquired && supabase) {
     console.log('⚠️ Could not acquire spin lock, another instance is spinning');
-    // Cek apakah ada spin yang sedang berlangsung
+   
     const ongoingSpin = await getSpinResultFromServer();
     if (ongoingSpin) {
       console.log('🔄 Found ongoing spin, syncing...');
@@ -1037,7 +1035,7 @@ async function performSpin() {
   console.log('🎪 Starting spin with', filledSlots.length, 'participants');
 
   try {
-    // PERBAIKAN UTAMA: Tentukan pemenang di server TERLEBIH DAHULU
+   
     const spinResult = await determineWinnerOnServer();
     if (!spinResult) {
       console.error('❌ Failed to determine winner on server');
@@ -1047,7 +1045,7 @@ async function performSpin() {
     // Update spin timestamp
     await updateSpinTimestamp();
 
-    // PERBAIKAN UTAMA: Mulai synchronized spin
+    
     await synchronizedSpin(spinResult);
 
   } catch (error) {
@@ -1065,11 +1063,11 @@ async function performSpin() {
   }
 }
 
-// PERBAIKAN UTAMA: Fungsi untuk melakukan spin tersinkronisasi berdasarkan hasil server
+
 async function synchronizedSpin(spinResult) {
   const { targetRotation, spinDuration, spinStartTime } = spinResult;
   
-  // Hitung delay jika client join di tengah spin
+ 
   const now = Date.now();
   const elapsedTime = now - spinStartTime;
   const remainingDuration = Math.max(100, spinDuration - elapsedTime);
@@ -1087,7 +1085,7 @@ async function synchronizedSpin(spinResult) {
   // Show spinning message
   showMessage('🎪 Wheel is spinning...', 'info');
 
-  // PERBAIKAN UTAMA: Gunakan fallback jika GSAP tidak tersedia
+ 
   const onComplete = function() {
     console.log('🎪 Synchronized spin animation completed');
     const msg = document.getElementById('message');
@@ -1098,7 +1096,7 @@ async function synchronizedSpin(spinResult) {
   };
 
   if (typeof gsap !== 'undefined') {
-    // PERBAIKAN: Animasi menuju target rotation yang SAMA untuk semua client
+   
     gsap.to({ rotation: wheelRotation }, {
       rotation: wheelRotation + targetRotation,
       duration: remainingDuration / 1000,
@@ -1110,12 +1108,12 @@ async function synchronizedSpin(spinResult) {
       onComplete: onComplete
     });
   } else {
-    // PERBAIKAN: Fallback animation jika GSAP tidak tersedia
+    
     fallbackSpinAnimation(targetRotation, remainingDuration, onComplete);
   }
 }
 
-// PERBAIKAN UTAMA: Fungsi untuk memproses pemenang berdasarkan hasil server
+
 async function selectWinnerFromServer(spinResult) {
   const { winnerSlot, winnerAddress } = spinResult;
 
@@ -1151,7 +1149,7 @@ async function selectWinnerFromServer(spinResult) {
     // Remove winner from queue if they were there
     waitingQueue = waitingQueue.filter(addr => addr !== winnerAddress);
     
-    // PERBAIKAN: Auto fill empty slots setelah ada pemenang
+    
     const slotsUpdated = fillEmptySlots();
     console.log(`🔄 Auto-filled ${slotsUpdated ? 'some' : 'no'} empty slots from queue`);
 
@@ -1181,7 +1179,7 @@ async function selectWinnerFromServer(spinResult) {
   startCountdown();
 }
 
-// Function untuk highlight winning slot
+
 async function highlightWinningSlot(slotIndex) {
   const canvas = document.getElementById('wheelCanvas');
   if (!canvas) return;
@@ -1372,7 +1370,7 @@ async function initializeGame() {
     await loadGameState();
     console.log('✅ Game state loaded');
 
-    // PERBAIKAN: Auto fill empty slots saat startup
+    
     const slotsUpdated = fillEmptySlots();
     if (slotsUpdated) {
       await saveGameState();
@@ -1382,7 +1380,7 @@ async function initializeGame() {
     initializeWheel();
     updateDisplay();
 
-    // PERBAIKAN: Pastikan countdown dimulai dengan benar
+    
     if (!countdownInterval) {
       console.log('⏰ Starting countdown timer');
       startCountdown();
@@ -1455,7 +1453,7 @@ document.addEventListener('DOMContentLoaded', async function() {
       }
     });
 
-    // Debug mode dengan perbaikan tambahan
+    
     const debugMode = window.location.hash.includes('debug') || window.location.search.includes('debug');
     if (debugMode) {
       const debugPanel = document.createElement('div');
@@ -1565,7 +1563,7 @@ document.addEventListener('DOMContentLoaded', async function() {
           console.log('🔧 Local spinning flag:', isSpinning);
         },
 
-        // PERBAIKAN: Tambahan fungsi reset spin state
+        
         resetSpin: async () => {
           await releaseSpinLock();
           await markSpinCompleted();
@@ -1575,7 +1573,7 @@ document.addEventListener('DOMContentLoaded', async function() {
           console.log('🔧 Spin state completely reset');
         },
 
-        // PERBAIKAN: Tambahan fungsi untuk fill slots manual
+        
         fillSlots: async () => {
           const filled = fillEmptySlots();
           if (filled) {
@@ -1603,7 +1601,7 @@ document.addEventListener('visibilitychange', function() {
   if (!document.hidden && gameInitialized) {
     console.log('🔄 Page became visible, syncing game state...');
     loadGameState().then(() => {
-      // PERBAIKAN: Auto fill empty slots saat page visible
+      
       const slotsUpdated = fillEmptySlots();
       if (slotsUpdated) {
         saveGameState();
@@ -1637,7 +1635,7 @@ if (window.location.hash.includes('debug') || window.location.search.includes('d
       }
       
       await saveGameState();
-      await markSpinCompleted(); // PERBAIKAN: Reset spin state juga
+      await markSpinCompleted(); 
       updateDisplay();
       startCountdown();
       console.log('🔄 Game reset completed');
@@ -1646,9 +1644,9 @@ if (window.location.hash.includes('debug') || window.location.search.includes('d
 }
 
  function copyText() {
-    // ambil text
+
     const text = document.getElementById("myText").innerText;
-    // copy ke clipboard
+    
     navigator.clipboard.writeText(text).then(() => {
      
     });
