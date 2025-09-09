@@ -119,6 +119,16 @@ body {
   justify-content: center;
   display: flex;
 }
+.copy-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #ffffff; /* warna biru */
+}
+.copy-btn:hover {
+  color: #0056b3; /* warna saat hover */
+}
+
 
 /* Validation Section */
 .validation-card {

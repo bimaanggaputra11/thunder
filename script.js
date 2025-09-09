@@ -816,16 +816,7 @@ ctx.restore();
   ctx.fill();
 
   // Draw pointer at top 
-  ctx.beginPath();
-  ctx.moveTo(centerX, centerY - radius - -20); 
-  ctx.lineTo(centerX - 15, centerY - radius - 15); 
-  ctx.lineTo(centerX + 15, centerY - radius - 15); 
-  ctx.closePath();
-  ctx.fillStyle = '#c5b52a'; 
-  ctx.fill();
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  
 
   // Add pointer shadow
   ctx.beginPath();
@@ -833,7 +824,7 @@ ctx.restore();
   ctx.lineTo(centerX - 17, centerY - radius - 15);
   ctx.lineTo(centerX + 17, centerY - radius - 15);
   ctx.closePath();
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillStyle = 'transparent';
   ctx.fill();
 }
 
@@ -1653,3 +1644,12 @@ if (window.location.hash.includes('debug') || window.location.search.includes('d
     }
   };
 }
+
+ function copyText() {
+    // ambil text
+    const text = document.getElementById("myText").innerText;
+    // copy ke clipboard
+    navigator.clipboard.writeText(text).then(() => {
+     
+    });
+  }
