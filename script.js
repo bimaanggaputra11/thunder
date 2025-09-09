@@ -763,31 +763,49 @@ function initializeWheel() {
 
     // Draw text
     if (wheelSlots[i]) {
-      const textAngle = startAngle + anglePerSlot / 2;
-      const textX = centerX + Math.cos(textAngle) * (radius * 0.7);
-      const textY = centerY + Math.sin(textAngle) * (radius * 0.7);
-      
-      ctx.save();
-      ctx.translate(textX, textY);
-      ctx.rotate(textAngle + Math.PI / 2);
-      ctx.fillStyle = '#c5b52a';
-      ctx.font = 'bold 10px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(formatAddress(wheelSlots[i]), 0, 0);
-      ctx.restore();
+      // Draw text
+const textAngle = startAngle + anglePerSlot / 1.5;
+ctx.save();
+
+// Rotasi dan translasi teks ke posisi yang sesuai
+ctx.translate(centerX, centerY);
+ctx.rotate(textAngle); // Rotasi agar searah segmen
+
+ctx.textAlign = 'center';
+ctx.fillStyle = wheelSlots[i] ? '#c5b52a' : '#999';
+ctx.font = wheelSlots[i] ? 'bold 10px Arial' : '8px Arial';
+
+// Tampilkan teks lebih ke dalam roda (bukan di tepi luar)
+ctx.fillText(
+  wheelSlots[i] ? formatAddress(wheelSlots[i]) : 'Address holder',
+  radius * 0.5, // Ubah jarak dari pusat (lebih kecil dari sebelumnya)
+  0
+);
+
+ctx.restore();
+
     } else {
-      const textAngle = startAngle + anglePerSlot / 2;
-      const textX = centerX + Math.cos(textAngle) * (radius * 0.7);
-      const textY = centerY + Math.sin(textAngle) * (radius * 0.7);
-      
-      ctx.save();
-      ctx.translate(textX, textY);
-      ctx.rotate(textAngle + Math.PI / 2);
-      ctx.fillStyle = '#999';
-      ctx.font = '8px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Address holder', 0, 0);
-      ctx.restore();
+      // Draw text
+const textAngle = startAngle + anglePerSlot / 2;
+ctx.save();
+
+// Rotasi dan translasi teks ke posisi yang sesuai
+ctx.translate(centerX, centerY);
+ctx.rotate(textAngle); // Rotasi agar searah segmen
+
+ctx.textAlign = 'center';
+ctx.fillStyle = wheelSlots[i] ? '#c5b52a' : '#999';
+ctx.font = wheelSlots[i] ? 'bold 10px Arial' : '8px Arial';
+
+// Tampilkan teks lebih ke dalam roda (bukan di tepi luar)
+ctx.fillText(
+  wheelSlots[i] ? formatAddress(wheelSlots[i]) : 'Address holder',
+  radius * 0.5, // Ubah jarak dari pusat (lebih kecil dari sebelumnya)
+  0
+);
+
+ctx.restore();
+
     }
   }
 
