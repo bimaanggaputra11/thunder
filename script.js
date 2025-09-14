@@ -1651,3 +1651,25 @@ if (window.location.hash.includes('debug') || window.location.search.includes('d
      
     });
   }
+   async function loadWinners() {
+    const { data, error } = await supabase
+      .from('winners_list')
+      .select('address');
+
+    if (error) {
+      console.error('no data request:', error);
+      return;
+    }
+
+    const marquee = document.getElementById('winnerMarquee');
+
+    if (data.length === 0) {
+      marquee.textContent = 'nothing winner.';
+      return;
+    }
+
+    const addresses = data.map(item => `🏆 ${item.address}`);
+    marquee.textContent = addresses.join(' — ');
+  }
+
+  document.addEventListener('DOMContentLoaded', loadWinners);
