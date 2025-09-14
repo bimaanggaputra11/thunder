@@ -11,7 +11,7 @@ body {
   
 }
 .header {
-  background-color: #1a2d29;
+  background-color: #577a74;
   color: #00ffe0;
   padding: 10px;
   overflow: hidden;
@@ -60,8 +60,6 @@ body {
  
 }
 .logo {
-  width: 60px;
-  height: 60px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -145,6 +143,7 @@ body {
   align-items: center;
   justify-content: center;
   display: flex;
+  text-shadow: 0 0 0px #326458, 0 0 10px #77f8ed
 }
 .copy-btn {
   border: none;
@@ -172,6 +171,7 @@ body {
   color: #c5b52a;
   margin-bottom: 10px;
   font-size: 1.5rem;
+  text-shadow: 0 0 0px #ffffff, 0 0 20px #77f8ed;
 }
 
 .validation-card p {
@@ -326,6 +326,7 @@ box-shadow:
   margin: 20px 0;
   text-align: center;
   box-shadow: 0 3px 15px rgba(0,0,0,0.1); 
+  text-shadow: 0 0 0px #326458, 0 0 5px #77f8ed;
 animation: pulseBorder 1s infinite;
 }
 
@@ -393,12 +394,14 @@ border: 2px solid #437a62;
   color: #c5b52a;
   font-size: 0.9rem;
   margin-bottom: 5px;
+  text-shadow: 0 0 0px #326458, 0 0 5px #77f8ed
 }
 
 .stat-number {
   font-size: 1.5rem;
   font-weight: bold;
   color: #ffffff;
+  
 }
 
 /* Lists Section */
